@@ -14,20 +14,20 @@ import (
 	"github.com/TanNhatCMS/zcode-popup-watcher/internal/checker"
 )
 
-// runTray tren non-Windows: khoi dong daemon tach roi (giong ban
-// Bun truoc day), lenh thoat ngay, tat duoc terminal. Icon tray
-// goc khong co tren Linux/macOS (can GTK/AppIndicator rieng),
-// daemon bao bang thong bao he thong.
+// runTray trên non-Windows: khởi động daemon tách rời (giống bạn
+// Bun trước đây), lệnh thoát ngay, tắt được terminal. Icon tray
+// gốc không có trên Linux/macOS (cần GTK/AppIndicator riêng),
+// daemon báo bằng thông báo hệ thống.
 func runTray(opts TrayOptions) int {
 	checker.EnsureStateDir()
 	if pid, ok := readPidFrom(checker.PidFile()); ok && pidAlive(pid) {
-		fmt.Printf("[tray] Daemon da chay roi (PID %d).\n", pid)
-		fmt.Println("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop")
+		fmt.Printf("[tray] Daemon đã chạy rồi (PID %d).\n", pid)
+		fmt.Println("[tray] Xem trạng thái: zcode-deal status | Thoát: zcode-deal stop")
 		return 0
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Printf("[tray] LOI: khong xac dinh duoc duong dan binary de tach daemon: %v\n", err)
+		fmt.Printf("[tray] LỖI: không xác định được đường dẫn binary để tách daemon: %v\n", err)
 		return 2
 	}
 	childArgs := []string{"__tray-child", "--interval", fmt.Sprintf("%d", opts.IntervalSec)}
@@ -43,21 +43,21 @@ func runTray(opts TrayOptions) int {
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		fmt.Printf("[tray] LOI: khong khoi dong duoc daemon: %v\n", err)
+		fmt.Printf("[tray] LỖI: không khởi động được daemon: %v\n", err)
 		return 1
 	}
 	_ = cmd.Process.Release()
 	for i := 0; i < 20; i++ {
 		time.Sleep(100 * time.Millisecond)
 		if pid, ok := readPidFrom(checker.PidFile()); ok && pidAlive(pid) {
-			fmt.Printf("[tray] Daemon da chay (PID %d). Ban co the tat cua so terminal nay.\n", pid)
+			fmt.Printf("[tray] Daemon đã chạy (PID %d). Bạn có thể tắt cửa sổ terminal này.\n", pid)
 			fmt.Printf("[tray] Log: %s\n", checker.LogFile())
-			fmt.Println("[tray] He nay khong co menu tray goc: daemon chay nen + thong bao he thong, thoat bang stop.")
-			fmt.Println("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop")
+			fmt.Println("[tray] Hệ này không có menu tray gốc: daemon chạy nền + thông báo hệ thống, thoát bằng stop.")
+			fmt.Println("[tray] Xem trạng thái: zcode-deal status | Thoát: zcode-deal stop")
 			return 0
 		}
 	}
-	fmt.Println("[tray] LOI: daemon khong ghi PID file. Xem log (neu co):")
+	fmt.Println("[tray] LỖI: daemon không ghi PID file. Xem log (nếu có):")
 	if logText, err := os.ReadFile(checker.LogFile()); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(logText)), "\n")
 		if len(lines) > 10 {
@@ -67,13 +67,13 @@ func runTray(opts TrayOptions) int {
 			fmt.Println(line)
 		}
 	} else {
-		fmt.Println("(chua co log file)")
+		fmt.Println("(chưa có log file)")
 	}
 	return 1
 }
 
-// sleepWithTrigger cho het ms, nhung neu co file trigger thi tieu
-// thu file va tra ve true ngay (can check ngay). Port ban Bun.
+// sleepWithTrigger cho hết ms, nhưng nếu có file trigger thì tieu
+// thử file và trả về true ngay (cần check ngay). Port bản Bun.
 func sleepWithTrigger(ms time.Duration) bool {
 	step := 2 * time.Second
 	remaining := ms
@@ -92,7 +92,7 @@ func sleepWithTrigger(ms time.Duration) bool {
 	return false
 }
 
-// runTrayChild la daemon con do lenh tray tao ra (chi non-Windows).
+// runTrayChild là daemon con do lệnh tray tạo ra (chỉ non-Windows).
 func runTrayChild(opts TrayOptions) int {
 	checker.EnsureStateDir()
 	configDir := checker.ConfigDir(opts.ConfigDir)
@@ -110,20 +110,20 @@ func runTrayChild(opts TrayOptions) int {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigCh
-		logLine(fmt.Sprintf("[tray-child] Nhan %s, thoat.", sig))
+		logLine(fmt.Sprintf("[tray-child] Nhận %s, thoát.", sig))
 		cleanup()
 		os.Exit(0)
 	}()
 	_ = os.WriteFile(checker.PidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
-	logLine(fmt.Sprintf("[tray-child] Daemon bat dau (PID %d), interval %ds.", os.Getpid(), opts.IntervalSec))
+	logLine(fmt.Sprintf("[tray-child] Daemon bắt đầu (PID %d), interval %ds.", os.Getpid(), opts.IntervalSec))
 	deviceMid, token, err := resolveAuth(configDir)
 	if err != nil {
-		logLine(fmt.Sprintf("[tray-child] LOI auth: %v", err))
+		logLine(fmt.Sprintf("[tray-child] LỖI auth: %v", err))
 		cleanup()
 		return 2
 	}
 	if token == "" {
-		logLine("[tray-child] Luu y: khong co token, dang check an danh.")
+		logLine("[tray-child] Lưu ý: không có token, đang check ẩn danh.")
 	}
 	seq := 0
 	failures := 0
@@ -136,7 +136,7 @@ func runTrayChild(opts TrayOptions) int {
 			if delay > 10*time.Minute {
 				delay = 10 * time.Minute
 			}
-			logLine(fmt.Sprintf("[tray-child] Check loi (%v). Doi %s.", err, delay))
+			logLine(fmt.Sprintf("[tray-child] Check lỗi (%v). Đợi %s.", err, delay))
 			time.Sleep(delay)
 			continue
 		}
@@ -150,9 +150,9 @@ func runTrayChild(opts TrayOptions) int {
 		}
 		keys := strings.Join(freshDealKeys(deals), ", ")
 		if keys == "" {
-			keys = "(rong)"
+			keys = "(rỗng)"
 		}
-		logLine(fmt.Sprintf("[tray-child] Co %d delivery, %d moi: %s", len(deals), len(fresh), keys))
+		logLine(fmt.Sprintf("[tray-child] Có %d delivery, %d mới: %s", len(deals), len(fresh), keys))
 		if len(fresh) > 0 {
 			for _, deal := range fresh {
 				seen[deal.Key] = true
@@ -163,8 +163,8 @@ func runTrayChild(opts TrayOptions) int {
 			for _, deal := range fresh {
 				ids = append(ids, deal.Key)
 			}
-			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Co deal moi!", message)
-			Notify("ZCode - Co deal moi!", message)
+			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Có deal mới!", message)
+			Notify("ZCode - Có deal mới!", message)
 			if opts.AutoOpen {
 				logLine(OpenZcode())
 			}

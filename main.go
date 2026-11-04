@@ -1,11 +1,11 @@
-// main.go -- Diem vao duy nhat cua CLI zcode-deal (ban Go).
+// main.go -- Điểm vào duy nhất của CLI zcode-deal (bản Go).
 //
 // Build:
 //
 //	go build -o dist/zcode-deal .                          # Linux/macOS
-//	GOOS=windows go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal.exe .  # Windows (khong console)
+//	GOOS=windows go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal.exe .  # Windows (không console)
 //
-// CLI nay chi BAO deal, khong tu nhan thay ban. Xem README.md.
+// CLI này chỉ BÁO deal, không tự nhận thay bạn. Xem README.md.
 package main
 
 import (
@@ -15,51 +15,51 @@ import (
 
 const version = "2.0.0"
 
-const helpText = `zcode-deal ` + version + ` - Theo doi deal ZCode, chi bao, khong tu nhan.
+const helpText = `zcode-deal ` + version + ` - Theo dõi deal ZCode, chỉ báo, không tự nhận.
 
-Cach dung:
-  zcode-deal <lenh> [tuy chon]
+Cách dùng:
+  zcode-deal <lệnh> [tùy chọn]
   zcode-deal
-      Khong tham so: tu mo tray (tuong duong lenh tray).
+      Không tham số: tự mở tray (tương đương lệnh tray).
 
-Lenh:
-  check [--once] [--interval GIAY] [--config-dir DIR] [--open] [--dry-run] [--self-test]
-      Kiem tra deal qua API marketing/touch. Mac dinh poll lien tuc
-      moi 600 giay; --once chi kiem tra 1 lan roi thoat.
-  watch [tuy chon nhu check]
-      Giong check (poll lien tuc).
-  tray [--interval GIAY] [--config-dir DIR] [--open]
-      Tren Windows: mo app tray Go (icon + menu native).
-      Ngoai Windows: chay daemon tach roi, lenh thoat ngay, tat duoc
+Lệnh:
+  check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--dry-run] [--self-test]
+      Kiểm tra deal qua API marketing/touch. Mặc định poll liên tục
+      mỗi 600 giây; --once chỉ kiểm tra 1 lần rồi thoát.
+  watch [tùy chọn như check]
+      Giống check (poll liên tục).
+  tray [--interval GIÂY] [--config-dir DIR] [--open]
+      Trên Windows: mở app tray Go (icon + menu native).
+      Ngoài Windows: chạy daemon tách rời, lệnh thoát ngay, tắt được
       terminal.
   status
-      Daemon / app tray Go co dang chay khong? Xem vai dong log cuoi.
+      Daemon / app tray Go có đang chạy không? Xem vài dòng log cuối.
   stop
-      Dung daemon (app tray Go thoat bang menu Thoat trong tray).
+      Dùng daemon (app tray Go thoát bằng menu Thoát trong tray).
   reminder [--from HH:MM] [--to HH:MM] [--open]
-      Nhac theo khung gio deal dem (mac dinh 17:55-22:10 gio VN),
-      1 lan/ngay, khong goi API.
+      Nhắc theo khung giờ deal đêm (mặc định 17:55-22:10 giờ VN),
+      1 lần/ngày, không gọi API.
   reminder --test
-      Bao ngay de xem thu, khong doi khung gio.
+      Báo ngay để xem thử, không đợi khung giờ.
   self-test
-      Test parse snapshot mau, khong goi API, khong can token.
+      Test parse snapshot mẫu, không gọi API, không cần token.
   help
-      Hien bang nay.
+      Hiện bảng này.
   --version, -v
       In version.
 
-Vi du:
+Ví dụ:
   zcode-deal check --once
   zcode-deal tray --open
   zcode-deal status
   zcode-deal stop
   zcode-deal reminder --test
 
-State nam o ~/.zcode/mod/. Token chi doc tu ~/.zcode/v2 tren cung
-may/cung user voi ZCode, khong bao gio in ra hay ghi ra file.
+State nằm ở ~/.zcode/mod/. Token chỉ đọc từ ~/.zcode/v2 trên cùng
+máy/cùng user với ZCode, không bao giờ in ra hay ghi ra file.
 `
 
-// parseArgs port ham parseArgs ban Bun: --key value hoac --flag.
+// parseArgs port hàm parseArgs bản Bun: --key value hoặc --flag.
 func parseArgs(argv []string) (map[string]string, map[string]bool) {
 	args := map[string]string{}
 	bools := map[string]bool{}
@@ -127,7 +127,7 @@ func run(argv []string) int {
 	case "__tray-child":
 		return runTrayChild(trayOptionsFromArgs(args, bools))
 	default:
-		fmt.Printf("[cli] Lenh khong biet: %s\n\n", command)
+		fmt.Printf("[cli] Lệnh không biết: %s\n\n", command)
 		fmt.Print(helpText)
 		return 2
 	}

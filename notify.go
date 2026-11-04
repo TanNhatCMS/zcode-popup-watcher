@@ -12,15 +12,15 @@ import (
 	"github.com/TanNhatCMS/zcode-popup-watcher/internal/checker"
 )
 
-// logLine in ra console + ghi vao log chung (giong ban Bun).
+// logLine in ra console + ghi vào log chung (giống bản Bun).
 func logLine(line string) {
 	fmt.Println(line)
 	checker.AppendLog(line)
 }
 
-// Notify hien thong bao he thong (beeep: toast tren Windows,
-// notification tren macOS/Linux). Neu khong bao duoc thi in ra
-// console + bip, khong im lang mat thong bao (giong ban Bun).
+// Notify hiện thông báo hệ thống (beeep: toast trên Windows,
+// notification trên macOS/Linux). Nếu không báo được thì in ra
+// console + bip, không im lang mat thông báo (giống bản Bun).
 func Notify(title, message string) {
 	short := message
 	if len([]rune(short)) > 900 {
@@ -32,8 +32,8 @@ func Notify(title, message string) {
 	}
 }
 
-// openApp mo 1 file thuc thi/app (ZCode). Tren Linux chay truc
-// tiep file, khong qua xdg-open (xdg-open khong mo duoc binary).
+// openApp mở 1 file thuc thì/app (ZCode). Trên Linux chạy trực
+// tiếp file, không qua xdg-open (xdg-open không mở được binary).
 func openApp(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -47,7 +47,7 @@ func openApp(target string) error {
 	return cmd.Start()
 }
 
-// openFile mo 1 file tai lieu (log) bang app mac dinh.
+// openFile mở 1 file tai lieu (log) bằng app mặc định.
 func openFile(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -61,8 +61,8 @@ func openFile(target string) error {
 	return cmd.Start()
 }
 
-// OpenZcode mo app ZCode neu that su tim thay file thuc thi,
-// khong doan mo. Tra ve chuoi mo ta ket qua (giong ban Bun).
+// OpenZcode mở app ZCode nếu that su tìm thấy file thuc thì,
+// không doan mở. Trả về chuoi mô tả ket qua (giống bản Bun).
 func OpenZcode() string {
 	var candidates []string
 	if runtime.GOOS == "windows" {
@@ -84,8 +84,8 @@ func OpenZcode() string {
 			continue
 		}
 		if err := openApp(target); err == nil {
-			return fmt.Sprintf("Da goi mo ZCode: %s", target)
+			return fmt.Sprintf("Đã gọi mở ZCode: %s", target)
 		}
 	}
-	return "Khong tim thay ZCode tren may nay, ban mo app thu cong nhe."
+	return "Không tìm thấy ZCode trên máy này, bạn mở app thủ công nhé."
 }

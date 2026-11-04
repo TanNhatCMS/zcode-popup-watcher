@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 )
 
-// ListConfigFiles chi liet ke ten file, khong doc noi dung nhay cam.
+// ListConfigFiles chỉ liệt kê tên file, không đọc nội dùng nhạy cảm.
 func ListConfigFiles(configDir string) []string {
 	names := []string{
 		"telemetry-state.json",
@@ -35,13 +35,13 @@ func ReadCredentialKeys(configDir string) []string {
 	return keys
 }
 
-// Mask an token: chi hien 8 ky tu dau, giong ban Bun.
+// Mask ẩn token: chỉ hiện 8 ký tự đầu, giống bản Bun.
 func Mask(value string) string {
 	if value == "" {
-		return "(khong co)"
+		return "(không có)"
 	}
 	if len(value) <= 8 {
-		return "(co, da an)"
+		return "(có, đã ẩn)"
 	}
 	return value[:8] + "..."
 }
@@ -58,8 +58,8 @@ type ConfigSummary struct {
 func DescribeConfig(configDir string) ConfigSummary {
 	deviceMid, hasMid := ReadDeviceMid(configDir)
 	_, hasJWT := ReadZcodeJWT(configDir)
-	// ReadZcodeJWT tra false ca khi khong co key lan khi giai ma
-	// loi; dry-run chi can biet "co hay khong" nen chap nhan.
+	// ReadZcodeJWT tra false cả khi không có key lần khi giải mã
+	// lỗi; dry-run chỉ cần biết "có hay không" nền chap nhận.
 	return ConfigSummary{
 		ConfigDir:      configDir,
 		Files:          ListConfigFiles(configDir),
@@ -70,8 +70,8 @@ func DescribeConfig(configDir string) ConfigSummary {
 	}
 }
 
-// PidFile la file PID cua daemon (check/tray tren non-Windows).
+// PidFile là file PID của daemon (check/tray trên non-Windows).
 func PidFile() string { return filepath.Join(StateDir(), "deal-checker.pid") }
 
-// TriggerFile la file trigger "kiem tra ngay" cho daemon.
+// TriggerFile là file trigger "kiểm tra ngay" cho daemon.
 func TriggerFile() string { return filepath.Join(StateDir(), "check-now.trigger") }

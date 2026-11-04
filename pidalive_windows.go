@@ -8,8 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// pidAlive tren Windows: OpenProcess thanh cong nghia la tien
-// trinh con ton tai (Go khong ho tro kill(pid, 0) tren Windows).
+// pidAlive trên Windows: OpenProcess thành công nghia là tiến
+// trinh còn tồn tại (Go không ho tro kill(pid, 0) trên Windows).
 func pidAlive(pid int) bool {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
@@ -19,9 +19,9 @@ func pidAlive(pid int) bool {
 	return true
 }
 
-// signalDaemon tren Windows: Go khong ho tro SIGTERM, dung Kill
-// (TerminateProcess) luon - tuong duong hanh vi Node process.kill
-// SIGTERM tren Windows truoc day.
+// signalDaemon trên Windows: Go không ho tro SIGTERM, dùng Kill
+// (TerminateProcess) luon - tương đương hanh vi Node process.kill
+// SIGTERM trên Windows trước đây.
 func signalDaemon(proc *os.Process) error {
 	return proc.Kill()
 }

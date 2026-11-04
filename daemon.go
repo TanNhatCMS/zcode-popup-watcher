@@ -10,8 +10,8 @@ import (
 	"github.com/TanNhatCMS/zcode-popup-watcher/internal/checker"
 )
 
-// TrayOptions la tuy chon chung cho lenh tray (ca Windows
-// systray lan non-Windows daemon).
+// TrayOptions là tùy chọn chung cho lệnh tray (cả Windows
+// systray lẫn non-Windows daemon).
 type TrayOptions struct {
 	IntervalSec int
 	ConfigDir   string
@@ -36,30 +36,30 @@ func removePidFileIfMine(pid int) {
 	}
 }
 
-// handleStatus in trang thai daemon + app tray Go + log cuoi
-// + so deal da thay (port handleStatus ban Bun).
+// handleStatus in trạng thái daemon + app tray Go + log cuối
+// + số deal đã thấy (port handleStatus bản Bun).
 func handleStatus() int {
 	checker.EnsureStateDir()
 	if pid, ok := readPidFrom(checker.PidFile()); ok {
 		if pidAlive(pid) {
 			fmt.Printf("[tray] Daemon DANG CHAY (PID %d).\n", pid)
 		} else {
-			fmt.Printf("[tray] PID file con %d nhung tien trinh da chet (stale).\n", pid)
+			fmt.Printf("[tray] PID file còn %d nhưng tiến trình đã chết (stale).\n", pid)
 		}
 	} else {
-		fmt.Println("[tray] Daemon KHONG chay.")
+		fmt.Println("[tray] Daemon KHÔNG chạy.")
 	}
 	if pid, ok := readPidFrom(checker.GotrayPidFile()); ok {
 		if pidAlive(pid) {
 			fmt.Printf("[tray] App tray Go DANG CHAY (PID %d).\n", pid)
 		} else {
-			fmt.Printf("[tray] gotray.pid con %d nhung tien trinh da chet (stale) - app tray khong con, chay lai lenh tray de mo lai.\n", pid)
+			fmt.Printf("[tray] gotray.pid còn %d nhưng tiến trình đã chết (stale) - app tray không còn, chạy lại lệnh tray để mở lại.\n", pid)
 		}
 	} else {
-		fmt.Println("[tray] App tray Go KHONG chay (khong co gotray.pid). Chay lenh tray de mo app.")
+		fmt.Println("[tray] App tray Go KHÔNG chạy (không có gotray.pid). Chạy lệnh tray để mở app.")
 	}
 	if logText, err := os.ReadFile(checker.LogFile()); err == nil {
-		fmt.Println("[tray] 10 dong log cuoi:")
+		fmt.Println("[tray] 10 dòng log cuối:")
 		lines := strings.Split(strings.TrimSpace(string(logText)), "\n")
 		if len(lines) > 10 {
 			lines = lines[len(lines)-10:]
@@ -68,35 +68,35 @@ func handleStatus() int {
 			fmt.Printf("  %s\n", line)
 		}
 	} else {
-		fmt.Println("[tray] Chua co log file.")
+		fmt.Println("[tray] Chưa có log file.")
 	}
 	seen := checker.LoadSeen()
-	fmt.Printf("[tray] Da thay %d deal (seen file).\n", len(seen))
+	fmt.Printf("[tray] Đã thấy %d deal (seen file).\n", len(seen))
 	return 0
 }
 
-// handleStop dung daemon: SIGTERM (Unix) roi doi 3s, neu con song
-// thi SIGKILL; tren Windows dung Kill truc tiep (Go khong ho tro
-// SIGTERM tren Windows, con Node thi TerminateProcess nen hanh vi
-// tuong duong). Port handleStop ban Bun.
+// handleStop dùng daemon: SIGTERM (Unix) rồi đợi 3s, nếu còn sống
+// thì SIGKILL; trên Windows dùng Kill trực tiếp (Go không ho tro
+// SIGTERM trên Windows, còn Node thì TerminateProcess nền hanh vi
+// tương đương). Port handleStop bản Bun.
 func handleStop() int {
 	pid, ok := readPidFrom(checker.PidFile())
 	if !ok {
-		fmt.Println("[tray] Khong co daemon nao dang chay (khong thay PID file).")
+		fmt.Println("[tray] Không có daemon nào đang chạy (không thấy PID file).")
 		return 0
 	}
 	if !pidAlive(pid) {
-		fmt.Printf("[tray] PID %d da chet roi, don PID file cu.\n", pid)
+		fmt.Printf("[tray] PID %d đã chết rồi, dọn PID file cũ.\n", pid)
 		_ = os.Remove(checker.PidFile())
 		return 0
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Printf("[tray] Khong tim thay tien trinh %d: %v\n", pid, err)
+		fmt.Printf("[tray] Không tìm thấy tiến trình %d: %v\n", pid, err)
 		return 1
 	}
 	if err := signalDaemon(proc); err != nil {
-		fmt.Printf("[tray] Khong gui duoc tin hieu dung toi PID %d: %v\n", pid, err)
+		fmt.Printf("[tray] Không gửi được tin hiệu dùng tới PID %d: %v\n", pid, err)
 		return 1
 	}
 	for i := 0; i < 30; i++ {
@@ -109,14 +109,14 @@ func handleStop() int {
 		_ = proc.Kill()
 	}
 	_ = os.Remove(checker.PidFile())
-	fmt.Printf("[tray] Da thoat daemon (PID %d). App tray Go (neu dang chay) khong bi anh huong, thoat bang menu Thoat trong tray.\n", pid)
+	fmt.Printf("[tray] Đã thoát daemon (PID %d). App tray Go (nếu đang chạy) không bị ảnh hưởng, thoát bằng menu Thoát trong tray.\n", pid)
 	return 0
 }
 
-// formatDealsMessage tao thong bao deal moi (dung chung cho
-// check/watch/daemon/tray, giong ban Bun).
+// formatDealsMessage tạo thông báo deal mới (dùng chung cho
+// check/watch/daemon/tray, giống bản Bun).
 func formatDealsMessage(fresh []checker.Deal) string {
-	lines := []string{"ZCode co deal moi! Mo app va bam nut nhan trong app.", ""}
+	lines := []string{"ZCode có deal mới! Mở app và bấm nút nhận trong app.", ""}
 	for _, deal := range fresh {
 		lines = append(lines, fmt.Sprintf("- [%s] %s (priority %v)", deal.Position, deal.CampaignID, deal.Priority))
 		if deal.Title != "" {
@@ -126,7 +126,7 @@ func formatDealsMessage(fresh []checker.Deal) string {
 			lines = append(lines, "  "+deal.Detail)
 		}
 	}
-	lines = append(lines, "", "Tool nay chi bao, khong tu nhan thay ban.")
+	lines = append(lines, "", "Tool này chỉ báo, không tự nhận thay bạn.")
 	return strings.Join(lines, "\n")
 }
 

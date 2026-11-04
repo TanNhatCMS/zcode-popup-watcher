@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	// Nhung tzdata de LoadLocation("Asia/Ho_Chi_Minh") chay duoc
-	// ca tren Windows (noi khong co file zoneinfo IANA).
+	// Nhưng tzdata để LoadLocation("Asia/Ho_Chi_Minh") chạy được
+	// cả trên Windows (noi không có file zoneinfo IANA).
 	_ "time/tzdata"
 
 	"github.com/TanNhatCMS/zcode-popup-watcher/internal/checker"
@@ -48,12 +48,12 @@ func saveNotifiedDate(date string) {
 	checker.EnsureStateDir()
 	data, _ := json.MarshalIndent(map[string]string{"notifiedDate": date}, "", "  ")
 	if err := os.WriteFile(reminderStateFile(), data, 0o644); err != nil {
-		fmt.Printf("[watcher] khong ghi duoc state: %v\n", err)
+		fmt.Printf("[watcher] không ghi được state: %v\n", err)
 	}
 }
 
-// vnNow tra ve ngay (YYYY-MM-DD) + so phut trong ngay theo gio VN,
-// giong Intl.DateTimeFormat timeZone Asia/Ho_Chi_Minh ban Bun.
+// vnNow trả về ngay (YYYY-MM-DD) + số phút trong ngay theo giờ VN,
+// giống Intl.DateTimeFormat timeZone Asia/Ho_Chi_Minh bản Bun.
 func vnNow() (string, int) {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
@@ -63,9 +63,9 @@ func vnNow() (string, int) {
 	return now.Format("2006-01-02"), now.Hour()*60 + now.Minute()
 }
 
-// runReminder port popup-watcher.ts: khong goi API, khong doc token.
-// Den khung gio deal dem (mac dinh 17:55-22:10 gio VN) thi bao
-// 1 lan/ngay. --test bao ngay khong doi khung gio.
+// runReminder port popup-watcher.ts: không gọi API, không đọc token.
+// Den khung giờ deal đêm (mặc định 17:55-22:10 giờ VN) thì báo
+// 1 lần/ngày. --test báo ngay không đợi khung giờ.
 func runReminder(args map[string]string, bools map[string]bool) int {
 	fromStr := args["from"]
 	if fromStr == "" {
@@ -81,16 +81,16 @@ func runReminder(args map[string]string, bools map[string]bool) int {
 
 	showReminder := func() {
 		message := strings.Join([]string{
-			"Toi gio nhan deal dem ZCode!",
+			"Tới giờ nhận deal đêm ZCode!",
 			"",
-			"1. Mo ZCode.",
-			"2. Bam banner/modal deal dem trong app.",
-			"3. Tu 22:00 moi dung duoc, toi 08:00 sang hom sau reset.",
-			"4. Nho chon dung GLM-5.3-Flash + Global Building.",
+			"1. Mở ZCode.",
+			"2. Bấm banner/modal deal đêm trong app.",
+			"3. Từ 22:00 mới dùng được, tới 08:00 sáng hôm sau reset.",
+			"4. Nhớ chọn đúng GLM-5.3-Flash + Global Building.",
 			"",
-			"Tool nay chi bao, khong tu bam nhan thay ban.",
+			"Tool này chỉ báo, không tự bấm nhận thay bạn.",
 		}, "\n")
-		Notify("ZCode - Toi gio nhan deal dem!", message)
+		Notify("ZCode - Tới giờ nhận deal đêm!", message)
 		fmt.Println(message)
 		if autoOpen {
 			fmt.Println(OpenZcode())
@@ -102,7 +102,7 @@ func runReminder(args map[string]string, bools map[string]bool) int {
 		return 0
 	}
 
-	fmt.Printf("[watcher] Dang chay nen. Se bao trong khung %s-%s gio VN, 1 lan/ngay.\n", fromStr, toStr)
+	fmt.Printf("[watcher] Đang chạy nền. Sẽ báo trong khung %s-%s giờ VN, 1 lần/ngày.\n", fromStr, toStr)
 	for {
 		date, minutes := vnNow()
 		if loadNotifiedDate() != date && minutes >= fromMinutes && minutes <= toMinutesValue {

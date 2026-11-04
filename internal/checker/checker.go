@@ -1,8 +1,8 @@
-// Package checker port logic kiem tra deal ZCode tu deal-checker.ts
-// (Bun) sang Go. Chi dung stdlib: HTTP, AES-256-GCM, JSON, file.
-// State dung chung voi CLI o ~/.zcode/mod (seen_deals.json,
-// deal-checker.log, deal-notify.json) de deal da thay khong bi
-// bao lai, du chay bang CLI hay tray Go.
+// Package checker port logic kiểm tra deal ZCode từ deal-checker.ts
+// (Bun) sáng Go. Chỉ dùng stdlib: HTTP, AES-256-GCM, JSON, file.
+// State dùng chung với CLI o ~/.zcode/mod (seen_deals.json,
+// deal-checker.log, deal-notify.json) để deal đã thấy không bị
+// báo lại, du chạy bằng CLI hay tray Go.
 package checker
 
 import (
@@ -26,8 +26,8 @@ var APIURL = "https://zcode.z.ai/api/v1/marketing/touch"
 
 const DefaultInterval = 600 * time.Second
 
-// StateDir tra ve ~/.zcode/mod (HOME tren Linux/macOS,
-// USERPROFILE tren Windows qua os.UserHomeDir).
+// StateDir trả về ~/.zcode/mod (HOME trên Linux/macOS,
+// USERPROFILE trên Windows qua os.UserHomeDir).
 func StateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -45,8 +45,8 @@ func EnsureStateDir() {
 	_ = os.MkdirAll(StateDir(), 0o755)
 }
 
-// AppendLog ghi 1 dong co timestamp vao log, giu toi da ~200 dong
-// cuoi de log khong phi to vo han.
+// AppendLog ghi 1 dòng có timestamp vào log, giu tới đã ~200 dòng
+// cuối để log không phi to vo han.
 func AppendLog(line string) {
 	EnsureStateDir()
 	stamped := fmt.Sprintf("[%s] %s\n", time.Now().UTC().Format(time.RFC3339), line)
@@ -59,8 +59,8 @@ func AppendLog(line string) {
 	_ = os.WriteFile(LogFile(), []byte(strings.Join(lines, "\n")), 0o644)
 }
 
-// ConfigDir tra ve thu muc ~/.zcode/v2, ton trong
-// $ZCODE_DATA_BASE_DIR neu co (giong ZCode).
+// ConfigDir trả về thử mục ~/.zcode/v2, ton trong
+// $ZCODE_DATA_BASE_DIR nếu có (giống ZCode).
 func ConfigDir(override string) string {
 	if override != "" {
 		return override
@@ -99,11 +99,11 @@ func ReadDeviceMid(configDir string) (string, bool) {
 	return strings.TrimSpace(value), true
 }
 
-// cipherKey tra ve SHA256(secret), secret giong ZCode:
-// $ZCODE_CREDENTIAL_SECRET neu co, neu khong thi fallback
+// cipherKey trả về SHA256(secret), secret giống ZCode:
+// $ZCODE_CREDENTIAL_SECRET nếu có, nếu không thì fallback
 // "zcode-credential-fallback:<platform>:<homedir>:<username>".
-// Username tren Windows co the kem domain (DOMAIN\user) thi cat
-// lay phan sau dau \ cho khop voi Node os.userInfo().username.
+// Username trên Windows có thể kèm domain (DOMAIN\user) thì cắt
+// lấy phần sau dấu \ cho khop với Node os.userInfo().username.
 func cipherKey() []byte {
 	if secret := strings.TrimSpace(os.Getenv("ZCODE_CREDENTIAL_SECRET")); secret != "" {
 		sum := sha256.Sum256([]byte(secret))
@@ -178,7 +178,7 @@ func ReadZcodeJWT(configDir string) (string, bool) {
 	return strings.TrimSpace(plain), true
 }
 
-// Deal la 1 delivery da loc (moi vi tri chi lay 1 cai dau tien).
+// Deal là 1 delivery đã loc (mỗi vị trí chỉ lấy 1 cài đầu tiên).
 type Deal struct {
 	Key        string
 	CampaignID string
@@ -213,8 +213,8 @@ func buttonLabels(buttons any) []string {
 	return labels
 }
 
-// ParseSnapshot loc snapshot marketing/touch thanh deal,
-// giong app goc: moi vi tri (banner/popup) chi lay 1 cai dau tien.
+// ParseSnapshot loc snapshot marketing/touch thành deal,
+// giống app gốc: mỗi vị trí (banner/popup) chỉ lấy 1 cài đầu tiên.
 func ParseSnapshot(payload []byte) ([]Deal, error) {
 	var root map[string]any
 	if err := json.Unmarshal(payload, &root); err != nil {
@@ -260,7 +260,7 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			}
 			detail = strings.Join(labels, " / ")
 			if detail == "" {
-				detail = "(banner, khong co nut doc duoc)"
+				detail = "(banner, không có nút đọc được)"
 			}
 		} else {
 			popup, _ := delivery["popup"].(map[string]any)
@@ -313,11 +313,11 @@ func SaveSeen(seen map[string]bool) {
 	data, _ := json.MarshalIndent(keys, "", "  ")
 	EnsureStateDir()
 	if err := os.WriteFile(SeenFile(), data, 0o644); err != nil {
-		AppendLog(fmt.Sprintf("[gotray] khong ghi duoc seen file: %v", err))
+		AppendLog(fmt.Sprintf("[gotray] không ghi được seen file: %v", err))
 	}
 }
 
-// QueryDeals goi GET marketing/touch, timeout 15s.
+// QueryDeals gọi GET marketing/touch, timeout 15s.
 func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, error) {
 	if override := strings.TrimSpace(os.Getenv("ZCODE_MARKETING_URL")); override != "" {
 		APIURL = override
@@ -343,7 +343,7 @@ func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d tu marketing/touch", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d từ marketing/touch", resp.StatusCode)
 	}
 	var body []byte
 	buf := make([]byte, 0, 64*1024)
@@ -361,8 +361,8 @@ func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, e
 	return ParseSnapshot(body)
 }
 
-// WriteNotifyFile ghi file notify (chi key campaign, tieu de,
-// noi dung - khong bao gio co token) bang cach ghi tmp roi rename.
+// WriteNotifyFile ghi file notify (chỉ key campaign, tieu để,
+// nội dùng - không bao giờ có token) bằng cách ghi tmp rồi rename.
 func WriteNotifyFile(id, title, message string) {
 	EnsureStateDir()
 	payload := map[string]string{

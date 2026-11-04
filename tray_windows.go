@@ -34,38 +34,38 @@ func requestTrayCheckNow() {
 	}
 }
 
-// runTray tren Windows: app systray (menu native, icon, toast).
-// Ham nay block cho den khi user chon Thoat trong menu.
+// runTray trên Windows: app systray (menu native, icon, toast).
+// Hàm này block cho den khi user chọn Thoát trong menu.
 func runTray(opts TrayOptions) int {
 	trayOpts = opts
 	systray.Run(trayOnReady, trayOnExit)
 	return 0
 }
 
-// runTrayChild khong co y nghia tren Windows (tray la systray,
-// khong co daemon con). Giua lai stub de main.go goi chung duoc.
+// runTrayChild không có y nghia trên Windows (tray là systray,
+// không có daemon con). Giua lại stub để main.go gọi chung được.
 func runTrayChild(opts TrayOptions) int {
-	fmt.Println("[tray] Lenh noi bo __tray-child chi dung tren non-Windows. Tren Windows, lenh tray mo app systray.")
+	fmt.Println("[tray] Lệnh nội bộ __tray-child chỉ dùng trên non-Windows. Trên Windows, lệnh tray mở app systray.")
 	return 2
 }
 
 func trayOnReady() {
 	systray.SetIcon(iconNormal)
 	systray.SetTitle("ZCode Deal Watcher")
-	systray.SetTooltip("ZCode Deal Watcher - dang theo doi deal")
+	systray.SetTooltip("ZCode Deal Watcher - đang theo dõi deal")
 
-	mDeal := systray.AddMenuItem("Co deal moi", "Bam de mo ZCode nhan deal")
+	mDeal := systray.AddMenuItem("Có deal mới", "Bấm để mở ZCode nhận deal")
 	mDeal.Hide()
 	systray.AddSeparator()
-	mOpen := systray.AddMenuItem("Mo ZCode", "Mo app ZCode")
-	mCheck := systray.AddMenuItem("Kiem tra ngay", "Kiem tra deal ngay, khong doi het chu ky")
-	mLog := systray.AddMenuItem("Mo log", "Mo file log")
+	mOpen := systray.AddMenuItem("Mở ZCode", "Mở app ZCode")
+	mCheck := systray.AddMenuItem("Kiểm tra ngay", "Kiểm tra deal ngay, không đợi hết chu kỳ")
+	mLog := systray.AddMenuItem("Mở log", "Mở file log")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Thoat", "Thoat app tray")
+	mQuit := systray.AddMenuItem("Thoát", "Thoát app tray")
 
 	checker.EnsureStateDir()
 	_ = os.WriteFile(checker.GotrayPidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
-	logLine(fmt.Sprintf("[gotray] Tray Go da chay (PID %d), interval %ds.", os.Getpid(), trayOpts.IntervalSec))
+	logLine(fmt.Sprintf("[gotray] Tray Go đã chạy (PID %d), interval %ds.", os.Getpid(), trayOpts.IntervalSec))
 
 	go trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit)
 	go trayPollLoop(mDeal)
@@ -82,9 +82,9 @@ func trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit *systray.MenuItem) {
 			requestTrayCheckNow()
 		case <-mLog.ClickedCh:
 			if err := openFile(checker.LogFile()); err != nil {
-				logLine(fmt.Sprintf("Khong mo duoc log: %v", err))
+				logLine(fmt.Sprintf("Không mở được log: %v", err))
 			} else {
-				logLine(fmt.Sprintf("Da goi mo log: %s", checker.LogFile()))
+				logLine(fmt.Sprintf("Đã gọi mở log: %s", checker.LogFile()))
 			}
 		case <-mQuit.ClickedCh:
 			systray.Quit()
@@ -107,16 +107,16 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 	}
 	deviceMid, token, err := resolveAuth(config)
 	if err != nil {
-		logLine(fmt.Sprintf("[gotray] LOI auth: %v", err))
-		systray.SetTooltip("ZCode Deal Watcher - LOI auth")
+		logLine(fmt.Sprintf("[gotray] LỖI auth: %v", err))
+		systray.SetTooltip("ZCode Deal Watcher - LỖI auth")
 		return
 	}
 	if token == "" {
-		logLine("[gotray] Luu y: khong co token, dang check an danh.")
+		logLine("[gotray] Lưu ý: không có token, đang check ẩn danh.")
 	}
 	interval := time.Duration(trayOpts.IntervalSec) * time.Second
 	if interval < 300*time.Second {
-		logLine("[gotray] Canh bao: interval duoi 300s de bi 429.")
+		logLine("[gotray] Cảnh báo: interval dưới 300s dễ bị 429.")
 	}
 	seen := checker.LoadSeen()
 	failures := 0
@@ -129,8 +129,8 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 			if delay > 10*time.Minute {
 				delay = 10 * time.Minute
 			}
-			logLine(fmt.Sprintf("[gotray] Check loi (%v). Doi %s.", err, delay))
-			systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - loi check: %v", err))
+			logLine(fmt.Sprintf("[gotray] Check lỗi (%v). Đợi %s.", err, delay))
+			systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - lỗi check: %v", err))
 			if !trayWaitOrCheckNow(delay) {
 				return
 			}
@@ -145,10 +145,10 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 		}
 		keys := strings.Join(freshDealKeys(deals), ", ")
 		if keys == "" {
-			keys = "(rong)"
+			keys = "(rỗng)"
 		}
-		logLine(fmt.Sprintf("[gotray] Co %d delivery, %d moi: %s", len(deals), len(fresh), keys))
-		systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - check cuoi: %d delivery, %d moi", len(deals), len(fresh)))
+		logLine(fmt.Sprintf("[gotray] Có %d delivery, %d mới: %s", len(deals), len(fresh), keys))
+		systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - check cuối: %d delivery, %d mới", len(deals), len(fresh)))
 		if len(fresh) > 0 {
 			for _, deal := range fresh {
 				seen[deal.Key] = true
@@ -159,12 +159,12 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 			for _, deal := range fresh {
 				ids = append(ids, deal.Key)
 			}
-			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Co deal moi!", message)
+			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Có deal mới!", message)
 			systray.SetIcon(iconAlert)
-			systray.SetTooltip("ZCode Deal Watcher - CO DEAL MOI! Bam vao menu deal de mo ZCode.")
-			mDeal.SetTitle("Co deal moi - bam de mo ZCode")
+			systray.SetTooltip("ZCode Deal Watcher - CÓ DEAL MỚI! Bấm vào menu deal để mở ZCode.")
+			mDeal.SetTitle("Có deal mới - bấm để mở ZCode")
 			mDeal.Show()
-			Notify("ZCode - Co deal moi!", message)
+			Notify("ZCode - Có deal mới!", message)
 			if trayOpts.AutoOpen {
 				logLine(OpenZcode())
 			}
@@ -191,5 +191,5 @@ func trayWaitOrCheckNow(d time.Duration) bool {
 func trayOnExit() {
 	close(trayQuitCh)
 	_ = os.Remove(checker.GotrayPidFile())
-	logLine("[gotray] App tray da thoat.")
+	logLine("[gotray] App tray đã thoát.")
 }

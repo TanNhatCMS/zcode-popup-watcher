@@ -12,7 +12,7 @@ func pidAlive(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
-// signalDaemon gui SIGTERM cho daemon (chi dung tren Unix).
+// signalDaemon gửi SIGTERM cho daemon (chỉ dùng trên Unix).
 func signalDaemon(proc *os.Process) error {
 	return proc.Signal(syscall.SIGTERM)
 }

@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// nodePlatform doi GOOS cua Go sang ten platform cua Node
-// (os.platform()) ma ZCode dung trong fallback secret. Dac biet:
-// Go goi la "windows", Node goi la "win32" — dung "windows" thi
-// secret sai, giai ma that bai (da gap that tren Windows cua user
-// ngay 2026-11-04: tray bao LOI auth du token ton tai).
-// "darwin"/"linux" thi 2 ben giong nhau.
+// nodePlatform đợi GOOS của Go sáng tên platform của Node
+// (os.platform()) mà ZCode dùng trong fallback secret. Dac biết:
+// Go gọi là "windows", Node gọi là "win32" — dùng "windows" thì
+// secret sai, giải mã that bai (đã gap that trên Windows của user
+// ngay 2026-11-04: tray báo LỖI auth du token tồn tại).
+// "darwin"/"linux" thì 2 bên giống nhau.
 func nodePlatform(goos string) string {
 	if goos == "windows" {
 		return "win32"
@@ -23,9 +23,9 @@ func runtimeGOOS() string {
 	return nodePlatform(runtime.GOOS)
 }
 
-// currentUsername tra ve username khong kem domain (neu co dang
-// DOMAIN\user thi lay phan sau dau \) cho khop voi fallback
-// secret cua ZCode (Node os.userInfo().username).
+// currentUsername trả về username không kèm domain (nếu có đang
+// DOMAIN\user thì lấy phần sau dấu \) cho khop với fallback
+// secret của ZCode (Node os.userInfo().username).
 func currentUsername() string {
 	u, err := user.Current()
 	if err != nil || u == nil || u.Username == "" {
