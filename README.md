@@ -78,6 +78,14 @@ thư mục với `zcode-deal.exe` rồi mới chạy `zcode-deal.exe tray`.
 Các lệnh còn lại (`check`, `status`, `stop`, `reminder`) chỉ cần
 mỗi file exe.
 
+Chạy không tham số cũng mở tray luôn: double-click
+`zcode-deal.exe` trên Windows (hoặc chạy `zcode-deal` không tham số)
+sẽ tự khởi động daemon và hiện icon tray, tương đương lệnh `tray`.
+Chạy lại lần nữa khi daemon đã chạy thì chỉ đảm bảo icon tray hiện
+lên, không tạo daemon trùng (PID của icon được theo dõi ở
+`~/.zcode/mod/tray.pid`, `run.ps1` tự xoá file này khi thoát).
+Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
+
 CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
 request (job `build-exe`): vào tab Actions của repo, mở run tương
 ứng và tải artifact `zcode-deal-windows-x64` hoặc
@@ -170,6 +178,14 @@ workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
   code WinForms nên an toàn trên Linux).
 - Job `build-exe` — build `zcode-deal.exe` (Windows x64, cross-compile
   từ Ubuntu) và `zcode-deal` (Linux x64) rồi upload làm artifact.
+
+Ngoài ra còn có workflow `.github/workflows/release.yml` riêng cho
+phát hành: push một tag dạng `v*` (ví dụ `git tag v0.1.0 &&
+git push origin v0.1.0`) hoặc chạy thủ công từ tab Actions với input
+tag, workflow sẽ build hai file trên và tạo GitHub Release mang tên
+tag đó, đính kèm `zcode-deal.exe`, `zcode-deal` và `run.ps1` (đủ bộ
+để chạy tray trên Windows). Chạy lại cùng tag thì file cũ được ghi đè,
+không tạo release trùng.
 
 Chạy đúng các bước đó ở local bằng một lệnh: `bun run check`.
 

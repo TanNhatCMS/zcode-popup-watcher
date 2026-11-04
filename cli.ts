@@ -21,6 +21,9 @@ const HELP = `zcode-deal ${VERSION} - Theo doi deal ZCode, chi bao, khong tu nha
 
 Cach dung:
   zcode-deal <lenh> [tuy chon]
+  zcode-deal
+      Khong tham so: tu mo tray (tuong duong lenh tray).
+      Double-click zcode-deal.exe tren Windows cung mo tray luon.
 
 Lenh:
   check [--once] [--interval GIAY] [--config-dir DIR] [--open]
@@ -65,6 +68,10 @@ async function main(): Promise<number> {
 
   switch (command) {
     case undefined:
+      // Double-click exe / chay khong tham so: mo tray luon, khong
+      // bat user go them lenh. Daemon da chay thi spawnTray chi dam
+      // bao icon tray hien len, khong tao daemon trung.
+      return await runDealChecker(["--tray"]);
     case "help":
     case "--help":
     case "-h":
@@ -90,8 +97,11 @@ async function main(): Promise<number> {
     case "self-test":
       return await runDealChecker(["--self-test"]);
     case "__tray-child":
-      // Lenh noi bo: daemon con do --tray tao ra (ban compile).
-      // Ban bun dung --tray-child truc tiep thay vi lenh nay.
+    case "--tray-child":
+      // Lenh noi bo: daemon con do --tray tao ra.
+      // Ban compile dung __tray-child; ban bun qua cli.ts dung
+      // --tray-child (vi Bun.main luc do la cli.ts, khong phai
+      // deal-checker.ts, nen spawnTray goi lai chinh cli).
       return await runDealChecker(["--tray-child", ...rest]);
     default:
       console.error(`[cli] Lenh khong biet: ${command}\n`);

@@ -58,6 +58,7 @@ const DEFAULT_INTERVAL_MS = 600_000;
 const STATE_DIR = join(homedir(), ".zcode", "mod");
 const SEEN_FILE = join(STATE_DIR, "seen_deals.json");
 const PID_FILE = join(STATE_DIR, "deal-checker.pid");
+const TRAY_PID_FILE = join(STATE_DIR, "tray.pid");
 const LOG_FILE = join(STATE_DIR, "deal-checker.log");
 const NOTIFY_FILE = join(STATE_DIR, "deal-notify.json");
 const TRIGGER_FILE = join(STATE_DIR, "check-now.trigger");
@@ -168,11 +169,76 @@ function forwardTrayArgs(original: string[]): string[] {
   return out;
 }
 
+function printTrayHelp(): void {
+  if (!isBunRunner()) {
+    console.log("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop");
+  } else if (scriptPath().endsWith("cli.ts")) {
+    console.log("[tray] Xem trang thai: bun run cli.ts status | Thoat: bun run cli.ts stop");
+  } else {
+    console.log("[tray] Xem trang thai: bun run deal-checker.ts --status | Thoat: bun run deal-checker.ts --stop");
+  }
+}
+
+// Mo icon tray Windows neu chua co. PID cua powershell duoc ghi
+// vao tray.pid ngay khi spawn, run.ps1 tu xoa file khi thoat;
+// PID chet thi lan chay sau spawn lai, khong tao 2 icon.
+function spawnTrayUI(): void {
+  if (process.platform !== "win32") return;
+  const existingTray = readPidFrom(TRAY_PID_FILE);
+  if (existingTray && pidAlive(existingTray)) {
+    console.log(`[tray] Icon tray da chay roi (PID ${existingTray}).`);
+    return;
+  }
+  const trayScript = join(appDir(), "run.ps1");
+  if (!existsSync(trayScript)) {
+    console.log(`[tray] Khong tim thay run.ps1 o ${trayScript}, daemon van chay nen nhung khong co icon tray.`);
+    return;
+  }
+  try {
+    const tray = spawn(
+      "powershell",
+      [
+        "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        trayScript,
+        "-PidFile",
+        PID_FILE,
+        "-NotifyFile",
+        NOTIFY_FILE,
+        "-TriggerFile",
+        TRIGGER_FILE,
+        "-LogFile",
+        LOG_FILE,
+        "-TrayPidFile",
+        TRAY_PID_FILE,
+      ],
+      { detached: true, stdio: "ignore" },
+    );
+    tray.unref();
+    if (tray.pid) {
+      try {
+        writeFileSync(TRAY_PID_FILE, String(tray.pid), "utf-8");
+      } catch {
+        // Bo qua, lan sau se spawn lai neu khong thay PID song.
+      }
+    }
+    console.log("[tray] Icon tray Windows da mo (menu: Mo ZCode / Kiem tra ngay / Mo log / Thoát).");
+  } catch (error) {
+    console.error(`[tray] Khong mo duoc icon tray: ${error}`);
+  }
+}
+
 async function spawnTray(cliArgs: string[]): Promise<number> {
   ensureStateDir();
   const existing = readPidFile();
   if (existing && pidAlive(existing)) {
-    console.log(`[tray] Daemon da chay roi (PID ${existing}). Dung --status de xem, --stop de thoat.`);
+    console.log(`[tray] Daemon da chay roi (PID ${existing}).`);
+    spawnTrayUI();
+    printTrayHelp();
     return 0;
   }
   const forwarded = forwardTrayArgs(cliArgs);
@@ -198,42 +264,11 @@ async function spawnTray(cliArgs: string[]): Promise<number> {
       console.log(`[tray] Daemon da chay (PID ${pid}). Ban co the tat cua so terminal nay.`);
       console.log(`[tray] Log: ${LOG_FILE}`);
       if (process.platform === "win32") {
-        const trayScript = join(appDir(), "run.ps1");
-        if (existsSync(trayScript)) {
-          const tray = spawn(
-            "powershell",
-            [
-              "-NoProfile",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              trayScript,
-              "-PidFile",
-              PID_FILE,
-              "-NotifyFile",
-              NOTIFY_FILE,
-              "-TriggerFile",
-              TRIGGER_FILE,
-              "-LogFile",
-              LOG_FILE,
-            ],
-            { detached: true, stdio: "ignore" },
-          );
-          tray.unref();
-          console.log("[tray] Icon tray Windows da mo (menu: Mo ZCode / Kiem tra ngay / Mo log / Thoát).");
-        } else {
-          console.log(`[tray] Khong tim thay run.ps1 o ${trayScript}, daemon van chay nen nhung khong co icon tray.`);
-        }
+        spawnTrayUI();
       } else {
         console.log("[tray] He nay chua co menu tray goc: daemon chay nen + thong bao he thong, thoat bang --stop.");
       }
-      if (isBunRunner()) {
-        console.log("[tray] Xem trang thai: bun run deal-checker.ts --status | Thoat: bun run deal-checker.ts --stop");
-      } else {
-        console.log("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop");
-      }
+      printTrayHelp();
       return 0;
     }
   }

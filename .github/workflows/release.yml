@@ -1,0 +1,61 @@
+name: Release
+
+# Cach phat hanh:
+#   git tag v0.1.0
+#   git push origin v0.1.0
+# Workflow nay se build zcode-deal.exe (Windows x64) va zcode-deal
+# (Linux x64) bang Bun compile, roi tao GitHub Release mang ten tag
+# va dinh kem ca 2 file + run.ps1 (can cho icon tray tren Windows).
+# Cung co the chay thu cong tu tab Actions (workflow_dispatch) voi
+# input tag, vi du v0.1.0.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag cua release can tao (vi du v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Build exe Windows + binary Linux
+        run: |
+          bun run build:exe
+          bun run build:exe:linux
+          ls -lh dist/
+          file dist/zcode-deal.exe dist/zcode-deal
+
+      - name: Tao release va dinh kem file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "Release tag: $TAG"
+          # run.ps1 dinh kem cung exe vi icon tray Windows can no
+          # nam cung thu muc voi exe.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG da ton tai, upload lai (ghi de)."
+            gh release upload "$TAG" --clobber dist/zcode-deal.exe dist/zcode-deal run.ps1
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes \
+              dist/zcode-deal.exe dist/zcode-deal run.ps1
+          fi

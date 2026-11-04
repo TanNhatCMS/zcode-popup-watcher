@@ -10,7 +10,10 @@
 # Cach chay (deal-checker.ts --tray se tu goi, khong can goi tay):
 #   powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass `
 #     -File run.ps1 -PidFile <pid> -NotifyFile <notify> `
-#     -TriggerFile <trigger> -LogFile <log>
+#     -TriggerFile <trigger> -LogFile <log> -TrayPidFile <tray-pid>
+# TrayPidFile la tuy chon: file ghi PID cua powershell de lan chay
+# sau biet icon dang song, khong tao 2 icon. Script tu xoa file
+# nay khi thoat.
 #
 # Luu y: file nay viet khong dau tieng Viet de tranh loi encoding
 # khi chay bang Windows PowerShell 5.1 (UTF-8 khong BOM).
@@ -19,7 +22,8 @@ param(
     [Parameter(Mandatory = $true)][string]$PidFile,
     [Parameter(Mandatory = $true)][string]$NotifyFile,
     [Parameter(Mandatory = $true)][string]$TriggerFile,
-    [Parameter(Mandatory = $true)][string]$LogFile
+    [Parameter(Mandatory = $true)][string]$LogFile,
+    [Parameter(Mandatory = $false)][string]$TrayPidFile = ""
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -149,3 +153,6 @@ $timer.Start()
 $timer.Stop()
 $script:Icon.Visible = $false
 $script:Icon.Dispose()
+if ($TrayPidFile) {
+    Remove-Item $TrayPidFile -Force -ErrorAction SilentlyContinue
+}
