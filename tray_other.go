@@ -125,40 +125,9 @@ func runTrayChild(opts TrayOptions) int {
 	if token == "" {
 		logLine("[tray-child] Lưu ý: không có token, đang check ẩn danh.")
 	}
-	seq := 0
-	failures := 0
-	seen := checker.LoadSeen()
-	for {
-		deals, err := checker.QueryDeals(token, deviceMid, locale, appVersion, seq)
-		if err != nil {
-			failures++
-			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
-			if delay > 10*time.Minute {
-				delay = 10 * time.Minute
-			}
-			logLine(fmt.Sprintf("[tray-child] Check lỗi (%v). Đợi %s.", err, delay))
-			time.Sleep(delay)
-			continue
-		}
-		seq++
-		failures = 0
-		var fresh []checker.Deal
-		for _, deal := range deals {
-			if !seen[deal.Key] {
-				fresh = append(fresh, deal)
-			}
-		}
-		keys := strings.Join(freshDealKeys(deals), ", ")
-		if keys == "" {
-			keys = "(rỗng)"
-		}
-		logLine(fmt.Sprintf("[tray-child] Có %d delivery, %d mới: %s", len(deals), len(fresh), keys))
-		if len(fresh) > 0 {
-			for _, deal := range fresh {
-				seen[deal.Key] = true
-			}
-			checker.SaveSeen(seen)
-			message := formatDealsMessage(fresh)
+	return runPoll(token, deviceMid, locale, appVersion, interval, false, pollCallbacks{
+		log: func(f string, a ...any) { logLine(fmt.Sprintf("[tray-child] "+f, a...)) },
+		onFresh: func(fresh []checker.Deal, message string) {
 			ids := make([]string, 0, len(fresh))
 			for _, deal := range fresh {
 				ids = append(ids, deal.Key)
@@ -168,7 +137,8 @@ func runTrayChild(opts TrayOptions) int {
 			if opts.AutoOpen {
 				logLine(OpenZcode())
 			}
-		}
-		sleepWithTrigger(interval)
-	}
+		},
+		waitInterval: func(d time.Duration) bool { sleepWithTrigger(d); return true },
+		waitError:    func(d time.Duration) bool { time.Sleep(d); return true },
+	})
 }

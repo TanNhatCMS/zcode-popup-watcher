@@ -23,7 +23,6 @@ var iconAlert []byte
 var (
 	trayCheckNowCh = make(chan struct{}, 1)
 	trayQuitCh     = make(chan struct{})
-	traySeq        = 0
 	trayOpts       TrayOptions
 )
 
@@ -118,43 +117,15 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 	if interval < 300*time.Second {
 		logLine("[gotray] Cảnh báo: interval dưới 300s dễ bị 429.")
 	}
-	seen := checker.LoadSeen()
-	failures := 0
-	for {
-		deals, err := checker.QueryDeals(token, deviceMid, locale, appVersion, traySeq)
-		traySeq++
-		if err != nil {
-			failures++
-			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
-			if delay > 10*time.Minute {
-				delay = 10 * time.Minute
-			}
-			logLine(fmt.Sprintf("[gotray] Check lỗi (%v). Đợi %s.", err, delay))
+	runPoll(token, deviceMid, locale, appVersion, interval, false, pollCallbacks{
+		log: func(f string, a ...any) { logLine(fmt.Sprintf("[gotray] "+f, a...)) },
+		onError: func(err error) {
 			systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - lỗi check: %v", err))
-			if !trayWaitOrCheckNow(delay) {
-				return
-			}
-			continue
-		}
-		failures = 0
-		var fresh []checker.Deal
-		for _, deal := range deals {
-			if !seen[deal.Key] {
-				fresh = append(fresh, deal)
-			}
-		}
-		keys := strings.Join(freshDealKeys(deals), ", ")
-		if keys == "" {
-			keys = "(rỗng)"
-		}
-		logLine(fmt.Sprintf("[gotray] Có %d delivery, %d mới: %s", len(deals), len(fresh), keys))
-		systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - check cuối: %d delivery, %d mới", len(deals), len(fresh)))
-		if len(fresh) > 0 {
-			for _, deal := range fresh {
-				seen[deal.Key] = true
-			}
-			checker.SaveSeen(seen)
-			message := formatDealsMessage(fresh)
+		},
+		onSuccess: func(deals, fresh []checker.Deal) {
+			systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - check cuối: %d delivery, %d mới", len(deals), len(fresh)))
+		},
+		onFresh: func(fresh []checker.Deal, message string) {
 			ids := make([]string, 0, len(fresh))
 			for _, deal := range fresh {
 				ids = append(ids, deal.Key)
@@ -168,11 +139,10 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 			if trayOpts.AutoOpen {
 				logLine(OpenZcode())
 			}
-		}
-		if !trayWaitOrCheckNow(interval) {
-			return
-		}
-	}
+		},
+		waitInterval: trayWaitOrCheckNow,
+		waitError:    trayWaitOrCheckNow,
+	})
 }
 
 func trayWaitOrCheckNow(d time.Duration) bool {

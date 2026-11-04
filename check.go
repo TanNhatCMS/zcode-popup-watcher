@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ type checkOptions struct {
 func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOptions {
 	intervalSec := 600
 	if v, ok := args["interval"]; ok {
-		if n, err := parseInt(v); err == nil && n > 0 {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			intervalSec = n
 		}
 	}
@@ -51,12 +52,6 @@ func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOpt
 		dryRun:     bools["dry-run"],
 		selfTest:   bools["self-test"],
 	}
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
 }
 
 func runSelfTest() int {
@@ -160,57 +155,15 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 	} else {
 		fmt.Println("[checker] Đã có token từ config (không hiện token ra đây).")
 	}
-	seq := 0
-	failures := 0
-	seen := checker.LoadSeen()
-	for {
-		deals, err := checker.QueryDeals(token, deviceMid, opts.locale, opts.appVersion, seq)
-		if err != nil {
-			failures++
-			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
-			if delay > 10*time.Minute {
-				delay = 10 * time.Minute
-			}
-			fmt.Printf("[checker] Check lỗi (%v). Đợi %s rồi thử lại.\n", err, delay)
-			if opts.once {
-				return 1
-			}
-			time.Sleep(delay)
-			continue
-		}
-		seq++
-		failures = 0
-		var fresh []checker.Deal
-		for _, deal := range deals {
-			if !seen[deal.Key] {
-				fresh = append(fresh, deal)
-			}
-		}
-		keys := strings.Join(freshDealKeys(deals), ", ")
-		if keys == "" {
-			keys = "(rỗng)"
-		}
-		fmt.Printf("[checker] Có %d delivery, %d mới: %s\n", len(deals), len(fresh), keys)
-		if len(fresh) > 0 {
-			for _, deal := range fresh {
-				seen[deal.Key] = true
-			}
-			checker.SaveSeen(seen)
-			Notify("ZCode - Có deal mới!", formatDealsMessage(fresh))
+	return runPoll(token, deviceMid, opts.locale, opts.appVersion, opts.interval, opts.once, pollCallbacks{
+		log: func(f string, a ...any) { fmt.Printf("[checker] "+f+"\n", a...) },
+		onFresh: func(fresh []checker.Deal, message string) {
+			Notify("ZCode - Có deal mới!", message)
 			if opts.autoOpen {
 				fmt.Println(OpenZcode())
 			}
-		}
-		if opts.once {
-			return 0
-		}
-		time.Sleep(opts.interval)
-	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+		},
+		waitInterval: func(d time.Duration) bool { time.Sleep(d); return true },
+		waitError:    func(d time.Duration) bool { time.Sleep(d); return true },
+	})
 }

@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 const version = "2.0.0"
@@ -82,7 +83,7 @@ func parseArgs(argv []string) (map[string]string, map[string]bool) {
 func trayOptionsFromArgs(args map[string]string, bools map[string]bool) TrayOptions {
 	intervalSec := 600
 	if v, ok := args["interval"]; ok {
-		if n, err := parseInt(v); err == nil && n > 0 {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			intervalSec = n
 		}
 	}

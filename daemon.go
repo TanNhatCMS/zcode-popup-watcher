@@ -130,7 +130,7 @@ func formatDealsMessage(fresh []checker.Deal) string {
 	return strings.Join(lines, "\n")
 }
 
-func freshDealKeys(deals []checker.Deal) []string {
+func dealKeys(deals []checker.Deal) []string {
 	keys := make([]string, 0, len(deals))
 	for _, deal := range deals {
 		keys = append(keys, deal.Key)

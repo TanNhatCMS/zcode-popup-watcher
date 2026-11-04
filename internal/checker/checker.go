@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -345,24 +346,15 @@ func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, e
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d từ marketing/touch", resp.StatusCode)
 	}
-	var body []byte
-	buf := make([]byte, 0, 64*1024)
-	tmp := make([]byte, 8192)
-	for {
-		n, err := resp.Body.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			break
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
-	body = buf
 	return ParseSnapshot(body)
 }
 
-// WriteNotifyFile ghi file notify (chỉ key campaign, tieu để,
-// nội dùng - không bao giờ có token) bằng cách ghi tmp rồi rename.
+// WriteNotifyFile ghi file notify (chỉ key campaign, tiêu đề,
+// nội dung - không bao giờ có token) bằng cách ghi tmp rồi rename.
 func WriteNotifyFile(id, title, message string) {
 	EnsureStateDir()
 	payload := map[string]string{
