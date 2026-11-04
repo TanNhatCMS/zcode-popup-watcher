@@ -1,235 +1,115 @@
-# zcode-popup-watcher
+# zcode-deal — Theo dõi deal ZCode, chỉ báo, không tự nhận
 
-[![CI](https://github.com/TanNhatCMS/zcode-popup-watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/TanNhatCMS/zcode-popup-watcher/actions/workflows/ci.yml)
+Tool Go duy nhất, 1 binary, theo dõi deal đêm ZCode rồi **báo ra màn hình**.
+Bạn tự mở app ZCode và bấm nút nhận trong app.
 
-Các tool theo dõi deal của ZCode và thông báo lên màn hình, để bạn
-tự nhận deal trong app ZCode chính thức.
+**Không tự claim.** Tool không gọi `POST /api/v1/marketing/touch/action`,
+không bấm nút nhận thay bạn, không lấy plan hộ. Tự động claim vi phạm
+điều khoản Z.ai, dễ bị 429, thu hồi quota hoặc khóa tài khoản.
 
-**Các tool này không bao giờ tự nhận deal thay bạn.** Chúng không gọi
-endpoint action của marketing, không bấm gì trong ZCode, và không gửi
-token của bạn đi đâu khác ngoài header `Authorization` tới
-`zcode.z.ai` khi kiểm tra snapshot marketing.
+## Cách hoạt động
 
-## Theo dõi cái gì
+1. Đọc `~/.zcode/v2/telemetry-state.json` → `deviceMid` (UUID, plaintext).
+2. Đọc `~/.zcode/v2/credentials.json` → giải mã key `zcodejwttoken`
+   (AES-256-GCM, key = SHA256(secret), secret = `$ZCODE_CREDENTIAL_SECRET`
+   nếu có, nếu không là `zcode-credential-fallback:<platform>:<homedir>:<username>`
+   — đúng scheme của ZCode). Giải mã chỉ chạy được trên cùng máy/cùng user
+   với ZCode; sai secret thì fail-closed, tool dừng lại, không đoán token.
+3. Poll `GET https://zcode.z.ai/api/v1/marketing/touch?seq=...` với header
+   `X-Device-Mid`, `X-Client-Language`, `X-ZCode-App-Version` và
+   `Authorization: Bearer <jwt>` nếu có token. Mặc định 600 giây/lần,
+   đúng nhịp poll của app gốc. Dưới 300 giây dễ bị 429.
+4. Có delivery mới (banner/popup, mỗi vị trí chỉ lấy 1 cái đầu tiên,
+   giống app gốc) thì hiện thông báo hệ thống + ghi vào seen file để
+   không báo lại lần sau.
 
-Hệ thống banner/popup trong app ZCode ("marketing-touch") hoạt động
-bằng cách polling, không phải push:
+Token **không bao giờ** in ra, ghi log hay ghi file — chỉ nằm trong RAM
+và gửi làm header tới `zcode.z.ai`. `--dry-run` chỉ in "có/không".
 
-```
-GET https://zcode.z.ai/api/v1/marketing/touch?seq=...
-```
+## Cài đặt
 
-kèm các header `X-Device-Mid`, `X-Client-Language`,
-`X-ZCode-App-Version` và, khi đã đăng nhập,
-`Authorization: Bearer <ZCode JWT>`. Server trả về một snapshot chứa
-`deliveries` (một `banner` và/hoặc một `popup`). Client chỉ hiển thị
-những gì server trả về, nên khung giờ chiến dịch, điều kiện tham gia
-và số lượng còn lại đều do server quyết định.
-
-## Các tool
-
-Chỉ dùng TypeScript + Bun. Không có dependency, không cần bước cài đặt.
-Cần có [Bun](https://bun.sh).
-
-| File | Chức năng |
-| --- | --- |
-| `cli.ts` | Điểm vào duy nhất của CLI `zcode-deal` (xem mục CLI bên dưới). Các file dưới vẫn chạy trực tiếp được bằng Bun. |
-| `deal-checker.ts` | Poll `marketing/touch` mỗi 600 giây (đúng chu kỳ của client production), hiện thông báo hệ thống khi có delivery mới. |
-| `popup-watcher.ts` | Nhắc theo khung giờ: thông báo một lần mỗi ngày trong khung 17:55–22:10 giờ VN cho deal đêm. Không gọi API. |
-| `zcode-config.ts` | Đọc config ở `~/.zcode/v2` (xem bên dưới). |
-| `notify.ts` | Thông báo hệ thống: macOS dùng `osascript`, Linux dùng `notify-send`, Windows dùng MessageBox, không có công cụ nào thì in ra console. |
-| `tray-go/` | App tray Go cho Windows (icon + menu native qua lib systray, file exe duy nhất ~10MB). Thay thế `run.ps1` và app Electron đã bỏ. |
+Tải `zcode-deal.exe` (Windows) hoặc `zcode-deal` (Linux) từ tab Releases,
+hoặc tự build từ source (cần Go 1.23+):
 
 ```sh
-bun run src/deal-checker.ts --once
-bun run src/deal-checker.ts            # poll chạy nền, 10 phút kiểm tra một lần
-bun run src/deal-checker.ts --self-test
-bun run src/deal-checker.ts --dry-run  # chỉ in cấu hình, không gọi API
-bun run src/popup-watcher.ts --test
+go build -o dist/zcode-deal .
+# Windows (cross-build từ Linux/macOS, không cần CGO):
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal.exe .
 ```
 
-## CLI và file .exe (Bun compile)
-
-Không cần cài Bun trên máy đích: build bằng `bun build --compile`
-thành file chạy độc lập (runtime Bun đã nhúng trong file). File này
-vẫn đọc config `~/.zcode/v2` trên cùng máy/cùng user với ZCode như
-bản script, và state vẫn ở `~/.zcode/mod/`.
+## Cách dùng
 
 ```sh
-# Chạy CLI bằng Bun (không cần build)
-bun run src/cli.ts check --once
-bun run src/cli.ts tray --open
-bun run src/cli.ts status
-bun run src/cli.ts stop
-bun run src/cli.ts reminder --test
-bun run src/cli.ts self-test
-bun run src/cli.ts --help
-
-# Build file chạy độc lập
-bun run build:exe        # Windows x64 -> dist/zcode-deal.exe
-bun run build:exe:linux  # Linux x64 -> dist/zcode-deal
-./dist/zcode-deal check --once
-./dist/zcode-deal tray --open
+zcode-deal                    # không tham số: tự mở tray
+zcode-deal check --once       # kiểm tra 1 lần rồi thoát
+zcode-deal check              # poll liên tục, 10 phút/lần
+zcode-deal tray               # chế độ chạy nền (xem dưới)
+zcode-deal status             # daemon / app tray có đang chạy không
+zcode-deal stop               # dừng daemon
+zcode-deal reminder           # nhắc theo khung giờ deal đêm, 1 lần/ngày
+zcode-deal reminder --test    # báo ngay để xem thử
+zcode-deal self-test          # test parse snapshot mẫu, không gọi API
+zcode-deal --version          # in version
 ```
 
-Trên Windows, icon tray do app Go trong `tray-go/` vẽ (lib
-systray native, không qua PowerShell nên không còn lỗi ký, không
-còn lỗi enum WinForms như `run.ps1` trước đây, và không còn
-Chromium 126MB như app Electron trước đó). Build app:
-```
-cd tray-go
-GOOS=windows go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal-tray.exe .
-```
-File exe duy nhất ~10MB ở `tray-go/dist/zcode-deal-tray.exe`.
-Chạy nó là có icon tray ngay (app tự poll deal, không cần daemon
-Bun). Lệnh `zcode-deal tray` trên Windows cũng mở app này nếu đã
-build (nó tìm file exe trong `tray-go/dist/`). Các lệnh còn lại
-(`check`, `status`, `stop`, `reminder`) chỉ cần mỗi file exe Bun.
-Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
+Tùy chọn chung cho `check`/`watch`/`tray`:
+`--interval GIÂY` (mặc định 600), `--config-dir DIR` (mặc định
+`~/.zcode/v2`), `--open` (có deal thì thử mở ZCode luôn).
+`check` thêm: `--once`, `--dry-run`, `--self-test`.
+`reminder` thêm: `--from HH:MM` (mặc định 17:55), `--to HH:MM`
+(mặc định 22:10, giờ VN), `--open`, `--test`.
 
-Không thấy icon trong tray thì kiểm tra theo thứ tự này
-(daemon Bun chạy không đồng nghĩa app tray đã mở, vì app tray
-Go là một process riêng):
-1. App Go đã build chưa? `zcode-deal tray` trên Windows sẽ báo
-   lỗi rõ ràng nếu chưa build, thay vì âm thầm chạy daemon không
-   icon như bản cũ. Build theo hướng dẫn ở trên.
-2. Icon có bị Windows giấu trong vùng overflow (mũi tên `^` ở góc
-   phải thanh tác vụ) không? Bấm `^` để xem, kéo icon ra ngoài nếu
-   muốn hiện luôn. Icon là hình chuông vàng có chấm xanh, bấm phải
-   mở menu; khi có deal icon đổi sang chuông chấm đỏ + hiện thông
-   báo, bấm vào mục deal trong menu để mở ZCode.
-3. Chạy `zcode-deal status` và xem dòng `App tray Go`: nếu báo
-   `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
-   `KHÔNG chạy` thì app chưa từng chạy hoặc đã thoát, xem log
-   `~/.zcode/mod/deal-checker.log` dòng bắt đầu bằng `[gotray]`.
+Biến môi trường tùy chọn: `ZCODE_DATA_BASE_DIR` (đổi thư mục gốc thay
+cho `$HOME`), `ZCODE_JWT_TOKEN` (ghi đè token, ưu tiên hơn
+`credentials.json`), `ZCODE_CREDENTIAL_SECRET`, `ZCODE_LOCALE`
+(mặc định `en-US`), `ZCODE_APP_VERSION` (mặc định `3.17.2`),
+`ZCODE_MARKETING_URL` (chỉ dùng để test với server mẫu cục bộ).
 
-CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
-request (job `build-exe`): vào tab Actions của repo, mở run tương
-ứng và tải artifact `zcode-deal-windows-x64` hoặc
-`zcode-deal-linux-x64` về dùng, không cần build ở local.
+## Chế độ tray / chạy nền
 
-## Chế độ tray / chạy nền (một lệnh, tắt được terminal)
+- **Windows:** `zcode-deal tray` mở app tray thật (icon chuông vàng +
+  menu native): Mở ZCode / Kiểm tra ngay / Mở log / Thoát. Có deal mới:
+  icon đổi chấm đỏ, toast hiện lên, bấm vào mục deal trong menu thì mở
+  ZCode. Chạy `zcode-deal.exe` không tham số cũng mở tray luôn.
+- **Linux/macOS:** chưa có menu tray gốc (cần GTK/AppIndicator riêng).
+  `zcode-deal tray` tách daemon chạy nền, lệnh thoát ngay, tắt được
+  terminal; daemon báo bằng thông báo hệ thống, thoát bằng
+  `zcode-deal stop`. Menu "Kiểm tra ngay" thay bằng file trigger:
+  `touch ~/.zcode/mod/check-now.trigger` là daemon check ngay.
 
-```sh
-bun run src/deal-checker.ts --tray      # khởi động daemon tách rời + icon tray, lệnh thoát ngay
-bun run src/deal-checker.ts --tray --open   # như trên, nhưng tự mở ZCode khi có deal
-bun run src/deal-checker.ts --status    # daemon có đang chạy không? xem vài dòng log cuối
-bun run src/deal-checker.ts --stop      # dừng daemon (tương đương nút Thoát trong menu tray)
+State chỉ nằm ở `~/.zcode/mod/`:
+
+```text
+~/.zcode/mod/
+  deal-checker.pid     # PID daemon (non-Windows)
+  gotray.pid           # PID app tray Go (Windows)
+  deal-checker.log     # log, giữ ~200 dòng cuối
+  deal-notify.json     # thông báo deal mới nhất (chỉ key/title/message)
+  check-now.trigger    # file trigger "kiểm tra ngay" cho daemon
+  seen_deals.json      # các deal đã báo rồi
+  popup-watcher-state.json  # ngày đã nhắc reminder
 ```
 
-Cách hoạt động: `--tray` tạo một tiến trình con Bun tách rời
-(`--tray-child`) rồi thoát ngay, nên bạn có thể tắt cửa sổ terminal.
-Tiến trình con tiếp tục poll, ghi log vào
-`~/.zcode/mod/deal-checker.log`, ghi PID vào
-`~/.zcode/mod/deal-checker.pid`, và ghi mỗi deal mới vào
-`~/.zcode/mod/deal-notify.json` (chỉ có key campaign, tiêu
-đề và nội dung — không bao giờ có token). Nếu đã có một daemon đang
-chạy mà gọi `--tray` thêm lần nữa thì lệnh sẽ từ chối, không tạo
-daemon trùng. State chỉ nằm ở `~/.zcode/mod`, code không đọc các
-thư mục cũ nữa — nếu còn daemon bản cũ đang chạy, hãy dừng nó trước
-rồi xoá hẳn các thư mục cũ cho gọn.
+Chạy song song daemon và app tray Go có thể báo trùng (mỗi bên chỉ
+load seen file 1 lần lúc khởi động), nên dừng daemon trước khi mở tray
+và ngược lại.
 
-Trên **Windows**, icon tray do app Go trong `tray-go/` vẽ
-(lib systray native), menu với các mục sau (hiện tiếng Việt có
-dấu):
+## Lưu ý an ninh
 
-- **Mở ZCode** — mở app ZCode (chỉ mở khi thật sự tìm thấy file thực
-  thi; các đường dẫn cài đặt thường gặp được kiểm tra trước).
-- **Kiểm tra ngay** — app kiểm tra lại ngay thay vì chờ đủ chu kỳ
-  600 giây.
-- **Mở log** — mở log của app bằng Notepad.
-- **Thoát** — thoát app tray.
+- Nếu không đặt `ZCODE_CREDENTIAL_SECRET`, khóa giải mã chỉ suy ra từ
+  platform + homedir + username, nên bất cứ ai chạy được với cùng user
+  trên cùng máy này cũng giải mã được. Đây là thiết kế của ZCode, không
+  phải do tool này làm yếu đi.
+- Tool chỉ đọc trên chính máy này, chỉ dùng cho tài khoản của chính bạn.
+  Đừng copy `credentials.json` sang máy khác rồi mong giải mã được —
+  và cũng đừng chia sẻ file đó cho ai.
 
-Khi có deal, icon đổi sang chuông chấm đỏ, hiện thông báo hệ thống
-và menu xuất hiện thêm mục deal ở trên cùng (bấm vào để mở ZCode).
-App Go tự poll deal (không cần daemon Bun), dùng chung thư mục
-state `~/.zcode/mod` với CLI nên deal đã thấy sẽ không bị báo lại.
-Đừng chạy song song daemon Bun và app Go: mỗi bên chỉ đọc seen
-file một lần lúc khởi động nên có thể báo trùng một deal.
+## Lịch sử
 
-Khi có deal, tray hiện thông báo dạng bong bóng từ file notify;
-**bấm vào bong bóng sẽ mở ZCode**, để bạn nhận deal trong app chính
-thức. Với `--open`, daemon tự mở ZCode ngay khi phát hiện deal, không
-cần chờ bạn bấm.
+- **2.0.0:** viết lại toàn bộ bằng Go, 1 binary duy nhất (thay bản Bun
+  1.0.1 + app tray Go riêng trước đó). Lệnh và state dir giữ nguyên.
+- 1.0.1 trở về trước: bản Bun (đã bỏ).
 
-Trên **macOS/Linux**, daemon Bun vẫn chạy tách rời kèm thông báo
-hệ thống, và `--stop` là cách để thoát. App Go cũng build được cho
-Linux/macOS (`go build`), nhưng icon tray trên Linux cần GTK nên
-chưa kiểm chứng trên máy headless; Windows là mục tiêu chính, hãy
-xác nhận trên Windows rằng icon và menu có hiện ra không — phía
-daemon (tách tiến trình, PID, log, file notify, trigger, stop) thì
-đã được kiểm chứng.
+## Giấy phép
 
-## Đọc config từ `~/.zcode/v2`
-
-Checker đọc, trên cùng máy và cùng user với ZCode:
-
-- `telemetry-state.json` → `deviceMid` (một UUID dạng plaintext,
-  không phải bí mật).
-- `credentials.json` → key `zcodejwttoken`, giá trị của nó đã được mã
-  hoá dạng `enc:v1:...` và được giải mã bằng AES-256-GCM. Khoá là
-  `SHA256(secret)`, trong đó secret là `$ZCODE_CREDENTIAL_SECRET` nếu
-  có, nếu không thì là
-  `zcode-credential-fallback:<platform>:<homedir>:<username>`
-  — đúng scheme của chính ZCode. Hệ quả:
-  - Tool chỉ chạy được trên cùng máy và cùng user với ZCode. Chạy khác
-    máy, khác user hoặc khác secret thì tool dừng lại (fail-closed)
-    thay vì đoán token.
-  - Nếu không đặt secret riêng, secret fallback này không phải là bảo
-    mật mạnh: bất cứ ai chạy được với cùng user trên cùng máy cũng
-    giải mã được, giống như chính ZCode làm được.
-  - Token không bao giờ được in ra, không bao giờ được ghi vào file
-    hay log, và chỉ tồn tại trong RAM trong lúc chạy. `--dry-run` chỉ
-    in ra token có hay không và `deviceMid` đã che bớt.
-
-Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
-
-## Kiểm tra tự động (CI)
-
-Mỗi lần push lên `main` hoặc mở pull request, GitHub Actions chạy
-workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
-
-- `bun run build` — build `src/cli.ts`, `src/deal-checker.ts` và
-  `popup-watcher.ts` ra `dist/` bằng Bun, để bắt lỗi cú pháp/import hỏng.
-- `bun run test` — self-test của deal-checker (chỉ parse snapshot
-  mẫu, không gọi API thật, không cần token).
-- `bun run test:watcher` — popup-watcher ở chế độ `--test`
-  (báo ngay, không chờ khung giờ).
-- `bun run src/cli.ts self-test` — kiểm tra CLI dispatch đúng lệnh.
-- Job `tray-go`: build app Go cho Windows (`GOOS=windows go
-  build`) và chạy `go test ./internal/...`, upload exe làm
-  artifact — Go cross-build từ Ubuntu nên không cần runner
-  Windows, khác với app Electron trước đây.
-- Job `build-exe` — build `zcode-deal.exe` (Windows x64, cross-compile
-  từ Ubuntu) và `zcode-deal` (Linux x64) rồi upload làm artifact.
-
-Ngoài ra còn có workflow `.github/workflows/release.yml` riêng cho
-phát hành: push một tag dạng `v*` (ví dụ `git tag v1.0.0 &&
-git push origin v1.0.0`) hoặc chạy thủ công từ tab Actions với input
-tag, workflow sẽ build hai file trên và tạo GitHub Release mang tên
-tag đó, đính kèm `zcode-deal.exe`, `zcode-deal` và file exe duy
-nhất của app tray Go cho Windows (`zcode-deal-tray.exe`, ~10MB,
-chạy trực tiếp không cần thêm file nào). Chạy lại cùng tag thì
-file cũ được ghi đè, không tạo release trùng.
-
-Chạy đúng các bước đó ở local bằng một lệnh: `bun run check`.
-
-## Kỷ luật polling
-
-- Chu kỳ mặc định là 600 giây, khớp với poller production của ZCode.
-  Đừng đặt dưới 300 giây: bạn dễ bị HTTP 429, nhất là khi app ZCode
-  cũng đang poll song song.
-- Khi gặp lỗi, thời gian chờ tăng theo cấp số nhân lên tới tối đa 10
-  phút, giống poller của app.
-- Các delivery đã thấy được ghi vào
-  `~/.zcode/mod/seen_deals.json` (chỉ key campaign, không
-  bao giờ có token) để mỗi deal chỉ được thông báo một lần.
-
-## Ghi chú bảo mật
-
-- Đừng bao giờ dán ZCode JWT của bạn vào chat, issue hay commit.
-- Các tool này chỉ thông báo, ở chế độ chỉ đọc. Muốn nhận deal, hãy
-  mở ZCode và bấm banner/popup trong app chính thức.
-- Tự động nhận quota miễn phí vi phạm điều khoản của Z.ai và có nguy
-  cơ bị giới hạn tần suất, thu hồi quota hoặc khoá tài khoản. Tính năng
-  đó cố tình không được làm ở đây.
+MIT © 2026 TanNhatCMS. Xem file `LICENSE`.
