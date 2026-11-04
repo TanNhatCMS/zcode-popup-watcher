@@ -2,10 +2,17 @@
 #
 # Khong tu check API, khong claim. No chi lam 3 viec:
 #   1. Hien icon tray + menu: "Mo ZCode", "Kiem tra ngay", "Mo log", "Thoat".
+#      Menu mo bang bam phai (mac dinh cua NotifyIcon) va ca bam trai
+#      (script tu hien menu khi nhan trai, vi ban cu chi co bam phai
+#      nen nhieu nguoi bam trai khong thay menu).
 #   2. Moi 5s doc file deal-notify.json do daemon Bun ghi; co id moi
 #      thi hien BalloonTip. Bam vao bong thong bao thi mo ZCode.
 #   3. Nut "Thoat" diet daemon Bun (theo PID file) roi tu thoat.
 #      Neu daemon bi dung bang --stop (PID file mat), tray cung tu thoat.
+#
+# Script tu ghi log khoi dong/thoat/loi vao file LogFile (cung file
+# deal-checker.log ma daemon ghi), de biet run.ps1 co chay khong va
+# thoat vi ly do gi, thay vi im lang bien mat.
 #
 # Cach chay (deal-checker.ts --tray se tu goi, khong can goi tay):
 #   powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass `
@@ -26,11 +33,30 @@ param(
     [Parameter(Mandatory = $false)][string]$TrayPidFile = ""
 )
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+function Write-TrayLog {
+    param([string]$Message)
+    try {
+        if ($LogFile) {
+            $stamp = (Get-Date -Format o)
+            Add-Content -Path $LogFile -Value "[$stamp] [tray-ui] $Message" -Force -ErrorAction Stop
+        }
+    } catch {
+        # Ghi log hong thi khong duoc lam hong tray.
+    }
+}
+
+try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+} catch {
+    Write-TrayLog "LOI: khong load duoc System.Windows.Forms: $($_.Exception.Message)"
+    exit 1
+}
 
 $script:LastNotifyId = ""
 $script:Exiting = $false
+$script:ExitReason = "unknown"
+Write-TrayLog "run.ps1 started (powershell PID $PID, PidFile=$PidFile, TrayPidFile=$TrayPidFile)."
 
 function Find-ZCode {
     $candidates = @(
@@ -58,6 +84,7 @@ function Open-ZCode {
 function Exit-Tray {
     if ($script:Exiting) { return }
     $script:Exiting = $true
+    $script:ExitReason = "menu Thoat"
     try {
         if (Test-Path $PidFile) {
             $pidText = (Get-Content $PidFile -Raw).Trim()
@@ -106,6 +133,13 @@ $itemExit.Add_Click({ Exit-Tray })
 
 $script:Icon.ContextMenuStrip = $menu
 $script:Icon.add_BalloonTipClicked({ Open-ZCode })
+# Bam trai vao icon cung mo menu (ban cu chi co bam phai mac dinh,
+# nen bam trai khong thay gi, de hieu nham la khong co icon/menu).
+$script:Icon.add_MouseClick({
+    if ($args[1].Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        $script:Icon.ContextMenuStrip.Show([System.Windows.Forms.Cursor]::Position)
+    }
+})
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
@@ -114,6 +148,7 @@ $timer.add_Tick({
     # Daemon bi dung bang --stop: PID file mat -> tray tu thoat.
     if (-not (Test-Path $PidFile)) {
         $script:Exiting = $true
+        $script:ExitReason = "PID file mat (daemon da dung bang --stop)"
         $script:Form.Close()
         return
     }
@@ -126,6 +161,7 @@ $timer.add_Tick({
                 $script:Icon.ShowBalloonTip(5000, "ZCode Deal Watcher",
                     "Daemon checker da dung. Tray se thoat.", "Warning")
                 $script:Exiting = $true
+                $script:ExitReason = "daemon PID chet"
                 $script:Form.Close()
                 return
             }
@@ -153,6 +189,7 @@ $timer.Start()
 $timer.Stop()
 $script:Icon.Visible = $false
 $script:Icon.Dispose()
+Write-TrayLog "run.ps1 exited (reason: $($script:ExitReason))."
 if ($TrayPidFile) {
     Remove-Item $TrayPidFile -Force -ErrorAction SilentlyContinue
 }

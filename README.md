@@ -87,14 +87,22 @@ lên, không tạo daemon trùng (PID của icon được theo dõi ở
 Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
 
 Không thấy icon trong tray thì kiểm tra theo thứ tự này (daemon chạy
-không đồng nghĩa icon đã mở, vì icon do `run.ps1` mở riêng):
+không đồng nghĩa icon đã mở, vì icon do `run.ps1` mở riêng, và
+icon chỉ là biểu tượng `i` mặc định của hệ thống, không phải logo
+ZCode nên rất dễ bị bỏ sót trong khay):
 1. `run.ps1` có nằm cùng thư mục với `zcode-deal.exe` không? Tải từ
    Release thì phải tải cả hai file, chỉ tải exe thì daemon chạy nền
    nhưng không có icon. Lỗi này được ghi vào
    `~/.zcode/mod/deal-checker.log` với dòng bắt đầu bằng `[tray]`.
 2. Icon có bị Windows giấu trong vùng overflow (mũi tên `^` ở góc phải
    thanh tác vụ) không? Bấm `^` để xem, kéo icon ra ngoài nếu muốn
-   hiện luôn.
+   hiện luôn. Menu mở bằng cả bấm trái lẫn bấm phải vào icon (bản
+   v1.0.0 chỉ mở bằng bấm phải, nên bấm trái không thấy gì rất dễ
+   hiểu nhầm là không có icon).
+   Nếu exe và `run.ps1` trước đó không cùng thư mục, sau khi đặt
+   chung thì dừng daemon cũ trước (`zcode-deal stop`, hoặc tắt
+   process `zcode-deal.exe` trong Task Manager) rồi chạy lại exe,
+   vì daemon cũ đã chạy thì lần chạy sau mới mở lại icon.
 3. Chạy `zcode-deal status` và xem dòng `Icon tray Windows`: nếu báo
    `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
    `KHÔNG chạy (không có tray.pid)` thì là trường hợp 1 hoặc
