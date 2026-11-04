@@ -62,13 +62,13 @@ jobs:
           file dist/zcode-deal.exe dist/zcode-deal
 
       - name: Upload exe Windows
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zcode-deal-windows-x64
           path: dist/zcode-deal.exe
 
       - name: Upload binary Linux
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zcode-deal-linux-x64
           path: dist/zcode-deal
