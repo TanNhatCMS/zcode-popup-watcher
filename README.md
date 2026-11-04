@@ -1,127 +1,135 @@
 # zcode-popup-watcher
 
-Tools that watch for ZCode deals and notify you on screen, so you can
-claim them yourself inside the official ZCode app.
+Các tool theo dõi deal của ZCode và thông báo lên màn hình, để bạn
+tự nhận deal trong app ZCode chính thức.
 
-**These tools never claim a deal for you.** They do not call the
-marketing action endpoint, they do not click inside ZCode, and they do
-not send your token anywhere except as an `Authorization` header to
-`zcode.z.ai` when checking the marketing snapshot.
+**Các tool này không bao giờ tự nhận deal thay bạn.** Chúng không gọi
+endpoint action của marketing, không bấm gì trong ZCode, và không gửi
+token của bạn đi đâu khác ngoài header `Authorization` tới
+`zcode.z.ai` khi kiểm tra snapshot marketing.
 
-## What is watched
+## Theo dõi cái gì
 
-ZCode's in-app banner/popup system ("marketing-touch") works by
-polling, not by push:
+Hệ thống banner/popup trong app ZCode ("marketing-touch") hoạt động
+bằng cách polling, không phải push:
 
 ```
 GET https://zcode.z.ai/api/v1/marketing/touch?seq=...
 ```
 
-with `X-Device-Mid`, `X-Client-Language`, `X-ZCode-App-Version` and,
-when logged in, `Authorization: Bearer <ZCode JWT>`. The server
-returns a snapshot with `deliveries` (one `banner` and/or one
-`popup`). The client only renders what the server returns, so the
-campaign window, eligibility and remaining quota are all decided
-server-side.
+kèm các header `X-Device-Mid`, `X-Client-Language`,
+`X-ZCode-App-Version` và, khi đã đăng nhập,
+`Authorization: Bearer <ZCode JWT>`. Server trả về một snapshot chứa
+`deliveries` (một `banner` và/hoặc một `popup`). Client chỉ hiển thị
+những gì server trả về, nên khung giờ chiến dịch, điều kiện tham gia
+và số lượng còn lại đều do server quyết định.
 
-## Tools
+## Các tool
 
-TypeScript + Bun only. No dependencies, no install step. Requires [Bun](https://bun.sh).
+Chỉ dùng TypeScript + Bun. Không có dependency, không cần bước cài đặt.
+Cần có [Bun](https://bun.sh).
 
-| File | What it does |
+| File | Chức năng |
 | --- | --- |
-| `deal-checker.ts` | Polls `marketing/touch` every 600s (the production client's interval), shows a native notification when a new delivery appears. |
-| `popup-watcher.ts` | Time-window reminder: notifies once a day in the 17:55–22:10 VN window for the nightly deal. No API calls. |
-| `zcode-config.ts` | Reads `~/.zcode/v2` config (see below). |
-| `notify.ts` | Native notifications: macOS `osascript`, Linux `notify-send`, Windows MessageBox, console fallback. |
-| `tray.ps1` | Windows system-tray icon for the background daemon (see below). Not used on other OSes. |
+| `deal-checker.ts` | Poll `marketing/touch` mỗi 600 giây (đúng chu kỳ của client production), hiện thông báo hệ thống khi có delivery mới. |
+| `popup-watcher.ts` | Nhắc theo khung giờ: thông báo một lần mỗi ngày trong khung 17:55–22:10 giờ VN cho deal đêm. Không gọi API. |
+| `zcode-config.ts` | Đọc config ở `~/.zcode/v2` (xem bên dưới). |
+| `notify.ts` | Thông báo hệ thống: macOS dùng `osascript`, Linux dùng `notify-send`, Windows dùng MessageBox, không có công cụ nào thì in ra console. |
+| `tray.ps1` | Icon system tray trên Windows cho daemon chạy nền (xem bên dưới). Không dùng trên hệ điều hành khác. |
 
 ```sh
 bun run deal-checker.ts --once
-bun run deal-checker.ts            # background polling
+bun run deal-checker.ts            # poll chạy nền, 10 phút kiểm tra một lần
 bun run deal-checker.ts --self-test
-bun run deal-checker.ts --dry-run  # config only, no API call
+bun run deal-checker.ts --dry-run  # chỉ in cấu hình, không gọi API
 bun run popup-watcher.ts --test
 ```
 
-## Tray / background mode (one command, terminal can be closed)
+## Chế độ tray / chạy nền (một lệnh, tắt được terminal)
 
 ```sh
-bun run deal-checker.ts --tray      # start detached daemon + tray icon, command exits at once
-bun run deal-checker.ts --tray --open   # same, but auto-open ZCode when a deal appears
-bun run deal-checker.ts --status    # is the daemon running? last log lines
-bun run deal-checker.ts --stop      # stop the daemon (same as Exit in the tray menu)
+bun run deal-checker.ts --tray      # khởi động daemon tách rời + icon tray, lệnh thoát ngay
+bun run deal-checker.ts --tray --open   # như trên, nhưng tự mở ZCode khi có deal
+bun run deal-checker.ts --status    # daemon có đang chạy không? xem vài dòng log cuối
+bun run deal-checker.ts --stop      # dừng daemon (tương đương nút Thoát trong menu tray)
 ```
 
-How it works: `--tray` spawns a detached Bun child (`--tray-child`)
-and exits immediately, so the terminal window can be closed. The
-child polls, writes its log to
-`~/.zcode_popup_watcher/deal-checker.log`, records its PID in
-`~/.zcode_popup_watcher/deal-checker.pid`, and writes each new deal
-to `~/.zcode_popup_watcher/deal-notify.json` (campaign keys, title
-and message only — never the token). A second `--tray` while one is
-running refuses to start a duplicate.
+Cách hoạt động: `--tray` tạo một tiến trình con Bun tách rời
+(`--tray-child`) rồi thoát ngay, nên bạn có thể tắt cửa sổ terminal.
+Tiến trình con tiếp tục poll, ghi log vào
+`~/.zcode_popup_watcher/deal-checker.log`, ghi PID vào
+`~/.zcode_popup_watcher/deal-checker.pid`, và ghi mỗi deal mới vào
+`~/.zcode_popup_watcher/deal-notify.json` (chỉ có key campaign, tiêu
+đề và nội dung — không bao giờ có token). Nếu đã có một daemon đang
+chạy mà gọi `--tray` thêm lần nữa thì lệnh sẽ từ chối, không tạo
+daemon trùng.
 
-On **Windows**, `--tray` also launches `tray.ps1`, which shows a
-system-tray icon with this menu:
+Trên **Windows**, `--tray` còn chạy `tray.ps1`, hiện icon system tray
+với menu sau:
 
-- **Mo ZCode** — opens the ZCode app (only if the executable is
-  actually found; common install paths are checked first).
-- **Kiem tra ngay** — writes a trigger file; the daemon checks
-  within ~2 seconds instead of waiting for the next 600s interval.
-- **Mo log** — opens the daemon log in Notepad.
-- **Thoat** — kills the daemon and closes the tray icon.
+- **Mở ZCode** — mở app ZCode (chỉ mở khi thật sự tìm thấy file thực
+  thi; các đường dẫn cài đặt thường gặp được kiểm tra trước).
+- **Kiểm tra ngay** — ghi một file trigger; daemon sẽ kiểm tra lại
+  trong khoảng 2 giây thay vì chờ đủ chu kỳ 600 giây.
+- **Mở log** — mở log của daemon bằng Notepad.
+- **Thoát** — giết daemon rồi tự tắt icon tray.
 
-When a deal appears, the tray shows a balloon notification from the
-notify file; **clicking the balloon opens ZCode**, so you can claim
-inside the official app. With `--open`, the daemon opens ZCode
-automatically as soon as a deal is found, without waiting for a click.
+Lưu ý: menu tray trên Windows hiển thị không dấu, vì `tray.ps1` được
+viết không dấu để tránh lỗi encoding của Windows PowerShell 5.1.
 
-On **macOS/Linux** there is no native tray menu yet (that would
-need a Swift menu-bar app or a Linux AppIndicator helper): the
-daemon still runs detached with system notifications, and `--stop`
-is the way to exit. The tray icon itself, including
-`tray.ps1`, could not be executed on the headless Linux test
-machine, so please confirm on Windows that the icon and its menu
-appear — the daemon side (spawn, PID, log, notify file, trigger,
-stop) was verified there.
+Khi có deal, tray hiện thông báo dạng bong bóng từ file notify;
+**bấm vào bong bóng sẽ mở ZCode**, để bạn nhận deal trong app chính
+thức. Với `--open`, daemon tự mở ZCode ngay khi phát hiện deal, không
+cần chờ bạn bấm.
 
-## Reading config from `~/.zcode/v2`
+Trên **macOS/Linux** hiện chưa có menu tray gốc (muốn có cần viết
+riêng một app menu bar bằng Swift hoặc một helper AppIndicator cho
+Linux): daemon vẫn chạy tách rời kèm thông báo hệ thống, và `--stop`
+là cách để thoát. Bản thân icon tray, bao gồm `tray.ps1`, chưa chạy
+thật được trên máy test Linux headless, nên hãy xác nhận trên Windows
+rằng icon và menu có hiện ra không — phía daemon (tách tiến trình,
+PID, log, file notify, trigger, stop) thì đã được kiểm chứng.
 
-The checker reads, on the same machine and user as ZCode:
+## Đọc config từ `~/.zcode/v2`
 
-- `telemetry-state.json` → `deviceMid` (a plaintext UUID, not a secret).
-- `credentials.json` → key `zcodejwttoken`, whose value is encrypted
-  as `enc:v1:...` and decrypted with AES-256-GCM. The key is
-  `SHA256(secret)`, where secret is `$ZCODE_CREDENTIAL_SECRET` if set,
-  otherwise `zcode-credential-fallback:<platform>:<homedir>:<username>`
-  — exactly ZCode's own scheme. Consequences:
-  - The tool only works on the same machine/user as ZCode. A different
-    machine, user, or secret fails closed instead of guessing a token.
-  - If no custom secret is set, that fallback secret is not strong
-    security: anyone running as the same user on the same machine can
-    decrypt it, just like ZCode itself can.
-  - The token is never printed, never written to a file or log, and
-    only lives in RAM for the run. `--dry-run` prints only whether a
-    token exists and a masked `deviceMid`.
+Checker đọc, trên cùng máy và cùng user với ZCode:
 
-A token supplied via `ZCODE_JWT_TOKEN` overrides `credentials.json`.
+- `telemetry-state.json` → `deviceMid` (một UUID dạng plaintext,
+  không phải bí mật).
+- `credentials.json` → key `zcodejwttoken`, giá trị của nó đã được mã
+  hoá dạng `enc:v1:...` và được giải mã bằng AES-256-GCM. Khoá là
+  `SHA256(secret)`, trong đó secret là `$ZCODE_CREDENTIAL_SECRET` nếu
+  có, nếu không thì là
+  `zcode-credential-fallback:<platform>:<homedir>:<username>`
+  — đúng scheme của chính ZCode. Hệ quả:
+  - Tool chỉ chạy được trên cùng máy và cùng user với ZCode. Chạy khác
+    máy, khác user hoặc khác secret thì tool dừng lại (fail-closed)
+    thay vì đoán token.
+  - Nếu không đặt secret riêng, secret fallback này không phải là bảo
+    mật mạnh: bất cứ ai chạy được với cùng user trên cùng máy cũng
+    giải mã được, giống như chính ZCode làm được.
+  - Token không bao giờ được in ra, không bao giờ được ghi vào file
+    hay log, và chỉ tồn tại trong RAM trong lúc chạy. `--dry-run` chỉ
+    in ra token có hay không và `deviceMid` đã che bớt.
 
-## Polling discipline
+Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
 
-- Default interval is 600 seconds, matching ZCode's production
-  poller. Do not go below 300 seconds: you risk HTTP 429, especially
-  while the ZCode app itself is also polling.
-- Failures back off exponentially up to 10 minutes, mirroring the
-  app's poller.
-- Seen deliveries are recorded in `~/.zcode_popup_watcher/seen_deals.json`
-  (campaign keys only, never tokens) so a deal is notified once.
+## Kỷ luật polling
 
-## Security notes
+- Chu kỳ mặc định là 600 giây, khớp với poller production của ZCode.
+  Đừng đặt dưới 300 giây: bạn dễ bị HTTP 429, nhất là khi app ZCode
+  cũng đang poll song song.
+- Khi gặp lỗi, thời gian chờ tăng theo cấp số nhân lên tới tối đa 10
+  phút, giống poller của app.
+- Các delivery đã thấy được ghi vào
+  `~/.zcode_popup_watcher/seen_deals.json` (chỉ key campaign, không
+  bao giờ có token) để mỗi deal chỉ được thông báo một lần.
 
-- Never paste your ZCode JWT into a chat, an issue, or a commit.
-- These tools are read-only notifiers. If you want a deal, open ZCode
-  and click the banner/popup inside the official app.
-- Automated claiming of free quotas breaches Z.ai's terms and risks
-  rate-limiting, revocation, or account suspension. That is
-  deliberately not implemented here.
+## Ghi chú bảo mật
+
+- Đừng bao giờ dán ZCode JWT của bạn vào chat, issue hay commit.
+- Các tool này chỉ thông báo, ở chế độ chỉ đọc. Muốn nhận deal, hãy
+  mở ZCode và bấm banner/popup trong app chính thức.
+- Tự động nhận quota miễn phí vi phạm điều khoản của Z.ai và có nguy
+  cơ bị giới hạn tần suất, thu hồi quota hoặc khoá tài khoản. Tính năng
+  đó cố tình không được làm ở đây.
