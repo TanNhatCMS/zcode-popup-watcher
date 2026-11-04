@@ -64,11 +64,9 @@ Tiến trình con tiếp tục poll, ghi log vào
 `~/.zcode/mod/deal-notify.json` (chỉ có key campaign, tiêu
 đề và nội dung — không bao giờ có token). Nếu đã có một daemon đang
 chạy mà gọi `--tray` thêm lần nữa thì lệnh sẽ từ chối, không tạo
-daemon trùng. Các bản cũ để state ở `~/.zcode/zcode-popup-watcher`
-hoặc `~/.zcode_popup_watcher`: PID và seen cũ vẫn được đọc để không
-chạy trùng daemon cũ và không báo lại deal đã thấy, nhưng mọi file
-mới chỉ ghi vào `~/.zcode/mod`. Sau khi đã dừng daemon cũ, bạn có
-thể xoá hẳn các thư mục cũ cho gọn.
+daemon trùng. State chỉ nằm ở `~/.zcode/mod`, code không đọc các
+thư mục cũ nữa — nếu còn daemon bản cũ đang chạy, hãy dừng nó trước
+rồi xoá hẳn các thư mục cũ cho gọn.
 
 Trên **Windows**, `--tray` còn chạy `run.ps1`, hiện icon system tray
 với menu sau:

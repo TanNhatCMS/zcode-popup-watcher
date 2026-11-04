@@ -52,25 +52,13 @@ import { notify, openZcode } from "./notify.ts";
 
 const API_URL = process.env.ZCODE_MARKETING_URL || "https://zcode.z.ai/api/v1/marketing/touch";
 const DEFAULT_INTERVAL_MS = 600_000;
-// State cua watcher nam chung trong thu muc config cua ZCode cho gon,
-// khong de rieng 1 dotfolder o HOME nua:
+// State cua watcher chi nam o ~/.zcode/mod, khong doc thu muc cu nao:
 //   ~/.zcode/mod/{deal-checker.pid, deal-checker.log,
 //     deal-notify.json, check-now.trigger, seen_deals.json}
-// Cac ban cu de state o ~/.zcode/zcode-popup-watcher hoac
-// ~/.zcode_popup_watcher: PID va seen cu van duoc doc (xem
-// readPidFile/loadSeen) de khong chay trung daemon cu va khong bao
-// lai deal da thay; ghi moi chi ghi vao thu muc moi.
 const STATE_DIR = join(homedir(), ".zcode", "mod");
-const LEGACY_STATE_DIRS = [
-  join(homedir(), ".zcode", "zcode-popup-watcher"),
-  join(homedir(), ".zcode_popup_watcher"),
-];
 const SEEN_FILE = join(STATE_DIR, "seen_deals.json");
-const LEGACY_SEEN_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "seen_deals.json"));
 const PID_FILE = join(STATE_DIR, "deal-checker.pid");
-const LEGACY_PID_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "deal-checker.pid"));
 const LOG_FILE = join(STATE_DIR, "deal-checker.log");
-const LEGACY_LOG_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "deal-checker.log"));
 const NOTIFY_FILE = join(STATE_DIR, "deal-notify.json");
 const TRIGGER_FILE = join(STATE_DIR, "check-now.trigger");
 
@@ -101,21 +89,14 @@ function readPidFrom(path: string): number | null {
 }
 
 function readPidFile(): number | null {
-  // Thu muc moi truoc, cac thu muc cu sau (daemon ban cu neu van chay).
-  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
-    const pid = readPidFrom(path);
-    if (pid !== null) return pid;
-  }
-  return null;
+  return readPidFrom(PID_FILE);
 }
 
 function removePidFilesIfMine(pid: number): void {
-  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
-    try {
-      if (readPidFrom(path) === pid) unlinkSync(path);
-    } catch {
-      // Bo qua.
-    }
+  try {
+    if (readPidFrom(PID_FILE) === pid) unlinkSync(PID_FILE);
+  } catch {
+    // Bo qua.
   }
 }
 
@@ -270,13 +251,10 @@ async function handleStop(): Promise<number> {
       // Bo qua.
     }
   }
-  // Xoa ca PID file moi va cu (neu co) de tray Windows thay mat la tu thoat.
-  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
-    try {
-      unlinkSync(path);
-    } catch {
-      // Daemon con cung tu xoa PID file khi thoat.
-    }
+  try {
+    unlinkSync(PID_FILE);
+  } catch {
+    // Daemon con cung tu xoa PID file khi thoat.
   }
   console.log(`[tray] Da thoat daemon (PID ${pid}). Tren Windows, icon tray se tu bien mat khi thay PID file mat.`);
   return 0;
@@ -292,13 +270,10 @@ function handleStatus(): number {
     console.log("[tray] Daemon KHONG chay.");
   }
   let logText: string | null = null;
-  for (const path of [LOG_FILE, ...LEGACY_LOG_FILES]) {
-    try {
-      logText = readFileSync(path, "utf-8");
-      break;
-    } catch {
-      // Thu file tiep theo.
-    }
+  try {
+    logText = readFileSync(LOG_FILE, "utf-8");
+  } catch {
+    logText = null;
   }
   if (logText !== null) {
     console.log("[tray] 10 dong log cuoi:");
@@ -307,7 +282,7 @@ function handleStatus(): number {
     console.log("[tray] Chua co log file.");
   }
   const seen = loadSeen();
-  console.log(`[tray] Da thay ${seen.size} deal (seen file, gom ca file cu neu co).`);
+  console.log(`[tray] Da thay ${seen.size} deal (seen file).`);
   return 0;
 }
 
@@ -511,18 +486,15 @@ const SAMPLE_SNAPSHOT = {
 };
 
 function loadSeen(): Set<string> {
-  const seen = new Set<string>();
-  for (const path of [SEEN_FILE, ...LEGACY_SEEN_FILES]) {
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf-8"));
-      if (Array.isArray(parsed)) {
-        for (const key of parsed as unknown[]) if (typeof key === "string") seen.add(key);
-      }
-    } catch {
-      // File khong co hoac hong: bo qua, khong lam hong vong poll.
-    }
+  try {
+    const parsed = JSON.parse(readFileSync(SEEN_FILE, "utf-8"));
+    if (!Array.isArray(parsed)) return new Set();
+    const seen = new Set<string>();
+    for (const key of parsed as unknown[]) if (typeof key === "string") seen.add(key);
+    return seen;
+  } catch {
+    return new Set();
   }
-  return seen;
 }
 
 function saveSeen(seen: Set<string>): void {
