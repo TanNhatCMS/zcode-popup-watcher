@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/gen2brain/beeep v0.11.3
 	github.com/getlantern/systray v1.2.2
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
