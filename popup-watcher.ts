@@ -15,10 +15,14 @@ import { join } from "node:path";
 import { notify, openZcode } from "./notify.ts";
 
 // State nam chung trong ~/.zcode cho gon, cung thu muc voi deal-checker.
-// Ban cu o ~/.zcode_popup_watcher van duoc doc 1 lan de khong bao lap.
-const STATE_DIR = join(homedir(), ".zcode", "zcode-popup-watcher");
+// Ban cu o ~/.zcode/zcode-popup-watcher hoac ~/.zcode_popup_watcher
+// van duoc doc 1 lan de khong bao lap.
+const STATE_DIR = join(homedir(), ".zcode", "mod");
 const STATE_FILE = join(STATE_DIR, "popup-watcher-state.json");
-const LEGACY_STATE_FILE = join(homedir(), ".zcode_popup_watcher", "popup-watcher-state.json");
+const LEGACY_STATE_FILES = [
+  join(homedir(), ".zcode", "zcode-popup-watcher", "popup-watcher-state.json"),
+  join(homedir(), ".zcode_popup_watcher", "popup-watcher-state.json"),
+];
 
 function vnHourMinute(): { date: string; minutes: number } {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -43,7 +47,7 @@ function toMinutes(hhmm: string): number {
 }
 
 function loadNotifiedDate(): string | null {
-  for (const path of [STATE_FILE, LEGACY_STATE_FILE]) {
+  for (const path of [STATE_FILE, ...LEGACY_STATE_FILES]) {
     try {
       const parsed = JSON.parse(readFileSync(path, "utf-8"));
       if (typeof parsed?.notifiedDate === "string") return parsed.notifiedDate;

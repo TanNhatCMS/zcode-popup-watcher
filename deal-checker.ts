@@ -54,19 +54,23 @@ const API_URL = process.env.ZCODE_MARKETING_URL || "https://zcode.z.ai/api/v1/ma
 const DEFAULT_INTERVAL_MS = 600_000;
 // State cua watcher nam chung trong thu muc config cua ZCode cho gon,
 // khong de rieng 1 dotfolder o HOME nua:
-//   ~/.zcode/zcode-popup-watcher/{deal-checker.pid, deal-checker.log,
+//   ~/.zcode/mod/{deal-checker.pid, deal-checker.log,
 //     deal-notify.json, check-now.trigger, seen_deals.json}
-// Cac ban cu de state o ~/.zcode_popup_watcher: PID va seen cu van
-// duoc doc (xem readPidFile/loadSeen) de khong chay trung daemon cu
-// va khong bao lai deal da thay; ghi moi chi ghi vao thu muc moi.
-const STATE_DIR = join(homedir(), ".zcode", "zcode-popup-watcher");
-const LEGACY_STATE_DIR = join(homedir(), ".zcode_popup_watcher");
+// Cac ban cu de state o ~/.zcode/zcode-popup-watcher hoac
+// ~/.zcode_popup_watcher: PID va seen cu van duoc doc (xem
+// readPidFile/loadSeen) de khong chay trung daemon cu va khong bao
+// lai deal da thay; ghi moi chi ghi vao thu muc moi.
+const STATE_DIR = join(homedir(), ".zcode", "mod");
+const LEGACY_STATE_DIRS = [
+  join(homedir(), ".zcode", "zcode-popup-watcher"),
+  join(homedir(), ".zcode_popup_watcher"),
+];
 const SEEN_FILE = join(STATE_DIR, "seen_deals.json");
-const LEGACY_SEEN_FILE = join(LEGACY_STATE_DIR, "seen_deals.json");
+const LEGACY_SEEN_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "seen_deals.json"));
 const PID_FILE = join(STATE_DIR, "deal-checker.pid");
-const LEGACY_PID_FILE = join(LEGACY_STATE_DIR, "deal-checker.pid");
+const LEGACY_PID_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "deal-checker.pid"));
 const LOG_FILE = join(STATE_DIR, "deal-checker.log");
-const LEGACY_LOG_FILE = join(LEGACY_STATE_DIR, "deal-checker.log");
+const LEGACY_LOG_FILES = LEGACY_STATE_DIRS.map((d) => join(d, "deal-checker.log"));
 const NOTIFY_FILE = join(STATE_DIR, "deal-notify.json");
 const TRIGGER_FILE = join(STATE_DIR, "check-now.trigger");
 
@@ -97,12 +101,16 @@ function readPidFrom(path: string): number | null {
 }
 
 function readPidFile(): number | null {
-  // Thu muc moi truoc, thu muc cu sau (daemon ban cu neu van chay).
-  return readPidFrom(PID_FILE) ?? readPidFrom(LEGACY_PID_FILE);
+  // Thu muc moi truoc, cac thu muc cu sau (daemon ban cu neu van chay).
+  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
+    const pid = readPidFrom(path);
+    if (pid !== null) return pid;
+  }
+  return null;
 }
 
 function removePidFilesIfMine(pid: number): void {
-  for (const path of [PID_FILE, LEGACY_PID_FILE]) {
+  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
     try {
       if (readPidFrom(path) === pid) unlinkSync(path);
     } catch {
@@ -263,7 +271,7 @@ async function handleStop(): Promise<number> {
     }
   }
   // Xoa ca PID file moi va cu (neu co) de tray Windows thay mat la tu thoat.
-  for (const path of [PID_FILE, LEGACY_PID_FILE]) {
+  for (const path of [PID_FILE, ...LEGACY_PID_FILES]) {
     try {
       unlinkSync(path);
     } catch {
@@ -284,13 +292,12 @@ function handleStatus(): number {
     console.log("[tray] Daemon KHONG chay.");
   }
   let logText: string | null = null;
-  try {
-    logText = readFileSync(LOG_FILE, "utf-8");
-  } catch {
+  for (const path of [LOG_FILE, ...LEGACY_LOG_FILES]) {
     try {
-      logText = readFileSync(LEGACY_LOG_FILE, "utf-8");
+      logText = readFileSync(path, "utf-8");
+      break;
     } catch {
-      logText = null;
+      // Thu file tiep theo.
     }
   }
   if (logText !== null) {
@@ -505,7 +512,7 @@ const SAMPLE_SNAPSHOT = {
 
 function loadSeen(): Set<string> {
   const seen = new Set<string>();
-  for (const path of [SEEN_FILE, LEGACY_SEEN_FILE]) {
+  for (const path of [SEEN_FILE, ...LEGACY_SEEN_FILES]) {
     try {
       const parsed = JSON.parse(readFileSync(path, "utf-8"));
       if (Array.isArray(parsed)) {

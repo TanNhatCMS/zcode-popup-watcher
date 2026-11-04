@@ -57,15 +57,16 @@ bun run deal-checker.ts --stop      # dừng daemon (tương đương nút Thoá
 Cách hoạt động: `--tray` tạo một tiến trình con Bun tách rời
 (`--tray-child`) rồi thoát ngay, nên bạn có thể tắt cửa sổ terminal.
 Tiến trình con tiếp tục poll, ghi log vào
-`~/.zcode/zcode-popup-watcher/deal-checker.log`, ghi PID vào
-`~/.zcode/zcode-popup-watcher/deal-checker.pid`, và ghi mỗi deal mới vào
-`~/.zcode/zcode-popup-watcher/deal-notify.json` (chỉ có key campaign, tiêu
+`~/.zcode/mod/deal-checker.log`, ghi PID vào
+`~/.zcode/mod/deal-checker.pid`, và ghi mỗi deal mới vào
+`~/.zcode/mod/deal-notify.json` (chỉ có key campaign, tiêu
 đề và nội dung — không bao giờ có token). Nếu đã có một daemon đang
 chạy mà gọi `--tray` thêm lần nữa thì lệnh sẽ từ chối, không tạo
-daemon trùng. Các bản cũ để state ở `~/.zcode_popup_watcher`: PID và
-seen cũ vẫn được đọc để không chạy trùng daemon cũ và không báo lại
-deal đã thấy, nhưng mọi file mới chỉ ghi vào `~/.zcode/zcode-popup-watcher`.
-Sau khi đã dừng daemon cũ, bạn có thể xoá hẳn thư mục cũ cho gọn.
+daemon trùng. Các bản cũ để state ở `~/.zcode/zcode-popup-watcher`
+hoặc `~/.zcode_popup_watcher`: PID và seen cũ vẫn được đọc để không
+chạy trùng daemon cũ và không báo lại deal đã thấy, nhưng mọi file
+mới chỉ ghi vào `~/.zcode/mod`. Sau khi đã dừng daemon cũ, bạn có
+thể xoá hẳn các thư mục cũ cho gọn.
 
 Trên **Windows**, `--tray` còn chạy `run.ps1`, hiện icon system tray
 với menu sau:
@@ -125,7 +126,7 @@ Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
 - Khi gặp lỗi, thời gian chờ tăng theo cấp số nhân lên tới tối đa 10
   phút, giống poller của app.
 - Các delivery đã thấy được ghi vào
-  `~/.zcode/zcode-popup-watcher/seen_deals.json` (chỉ key campaign, không
+  `~/.zcode/mod/seen_deals.json` (chỉ key campaign, không
   bao giờ có token) để mỗi deal chỉ được thông báo một lần.
 
 ## Ghi chú bảo mật
