@@ -26,9 +26,7 @@ server-side.
 
 ## Tools
 
-### Bun (recommended)
-
-No dependencies, no install step. Requires [Bun](https://bun.sh).
+TypeScript + Bun only. No dependencies, no install step. Requires [Bun](https://bun.sh).
 
 | File | What it does |
 | --- | --- |
@@ -45,21 +43,9 @@ bun run bun/deal-checker.ts --dry-run  # config only, no API call
 bun run bun/popup-watcher.ts --test
 ```
 
-### Python (stdlib only)
+## Reading config from `~/.zcode/v2`
 
-| File | What it does |
-| --- | --- |
-| `zcode_deal_checker.py` | Same API checker as the Bun version, with the token supplied via `ZCODE_JWT_TOKEN` env var (it does not read `credentials.json`). |
-| `zcode_popup_watcher.py` | Time-window reminder with a tkinter popup. |
-
-```sh
-ZCODE_JWT_TOKEN="<your-token>" python zcode_deal_checker.py --once
-python zcode_popup_watcher.py --test
-```
-
-## Reading config from `~/.zcode/v2` (Bun version only)
-
-The Bun checker reads, on the same machine and user as ZCode:
+The checker reads, on the same machine and user as ZCode:
 
 - `telemetry-state.json` → `deviceMid` (a plaintext UUID, not a secret).
 - `credentials.json` → key `zcodejwttoken`, whose value is encrypted
