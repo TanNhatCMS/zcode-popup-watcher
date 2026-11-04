@@ -35,7 +35,7 @@ Cần có [Bun](https://bun.sh).
 | `popup-watcher.ts` | Nhắc theo khung giờ: thông báo một lần mỗi ngày trong khung 17:55–22:10 giờ VN cho deal đêm. Không gọi API. |
 | `zcode-config.ts` | Đọc config ở `~/.zcode/v2` (xem bên dưới). |
 | `notify.ts` | Thông báo hệ thống: macOS dùng `osascript`, Linux dùng `notify-send`, Windows dùng MessageBox, không có công cụ nào thì in ra console. |
-| `tray.ps1` | Icon system tray trên Windows cho daemon chạy nền (xem bên dưới). Không dùng trên hệ điều hành khác. |
+| `run.ps1` | Icon system tray trên Windows cho daemon chạy nền (xem bên dưới). Không dùng trên hệ điều hành khác. |
 
 ```sh
 bun run deal-checker.ts --once
@@ -64,7 +64,7 @@ Tiến trình con tiếp tục poll, ghi log vào
 chạy mà gọi `--tray` thêm lần nữa thì lệnh sẽ từ chối, không tạo
 daemon trùng.
 
-Trên **Windows**, `--tray` còn chạy `tray.ps1`, hiện icon system tray
+Trên **Windows**, `--tray` còn chạy `run.ps1`, hiện icon system tray
 với menu sau:
 
 - **Mở ZCode** — mở app ZCode (chỉ mở khi thật sự tìm thấy file thực
@@ -74,7 +74,7 @@ với menu sau:
 - **Mở log** — mở log của daemon bằng Notepad.
 - **Thoát** — giết daemon rồi tự tắt icon tray.
 
-Lưu ý: menu tray trên Windows hiển thị không dấu, vì `tray.ps1` được
+Lưu ý: menu tray trên Windows hiển thị không dấu, vì `run.ps1` được
 viết không dấu để tránh lỗi encoding của Windows PowerShell 5.1.
 
 Khi có deal, tray hiện thông báo dạng bong bóng từ file notify;
@@ -85,7 +85,7 @@ cần chờ bạn bấm.
 Trên **macOS/Linux** hiện chưa có menu tray gốc (muốn có cần viết
 riêng một app menu bar bằng Swift hoặc một helper AppIndicator cho
 Linux): daemon vẫn chạy tách rời kèm thông báo hệ thống, và `--stop`
-là cách để thoát. Bản thân icon tray, bao gồm `tray.ps1`, chưa chạy
+là cách để thoát. Bản thân icon tray, bao gồm `run.ps1`, chưa chạy
 thật được trên máy test Linux headless, nên hãy xác nhận trên Windows
 rằng icon và menu có hiện ra không — phía daemon (tách tiến trình,
 PID, log, file notify, trigger, stop) thì đã được kiểm chứng.

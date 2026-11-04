@@ -1,4 +1,4 @@
-# tray.ps1 -- Icon tray Windows cho deal-checker.ts (chi chay tren Windows).
+# run.ps1 -- Icon tray Windows cho deal-checker.ts (chi chay tren Windows).
 #
 # Khong tu check API, khong claim. No chi lam 3 viec:
 #   1. Hien icon tray + menu: "Mo ZCode", "Kiem tra ngay", "Mo log", "Thoat".
@@ -9,7 +9,7 @@
 #
 # Cach chay (deal-checker.ts --tray se tu goi, khong can goi tay):
 #   powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass `
-#     -File tray.ps1 -PidFile <pid> -NotifyFile <notify> `
+#     -File run.ps1 -PidFile <pid> -NotifyFile <notify> `
 #     -TriggerFile <trigger> -LogFile <log>
 #
 # Luu y: file nay viet khong dau tieng Viet de tranh loi encoding

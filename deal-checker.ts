@@ -29,7 +29,7 @@
 //   bun run deal-checker.ts --tray          # tach daemon + icon tray, lenh thoat ngay
 //   bun run deal-checker.ts --status        # xem daemon co dang chay khong
 //   bun run deal-checker.ts --stop          # thoat daemon (tuong duong nut Thoat trong tray)
-//   Tren Windows, --tray con mo tray.ps1: icon tray co menu
+//   Tren Windows, --tray con mo run.ps1: icon tray co menu
 //   "Mo ZCode", "Kiem tra ngay", "Mo log", "Thoát". Bam vao bong
 //   thong bao deal cung mo ZCode. Tren macOS/Linux chua co menu tray
 //   goc (can Swift/AppIndicator rieng), daemon van chay nen, bao bang
@@ -160,7 +160,7 @@ async function spawnTray(): Promise<number> {
       console.log(`[tray] Daemon da chay (PID ${pid}). Ban co the tat cua so terminal nay.`);
       console.log(`[tray] Log: ${LOG_FILE}`);
       if (process.platform === "win32") {
-        const trayScript = join(dirname(script), "tray.ps1");
+        const trayScript = join(dirname(script), "run.ps1");
         if (existsSync(trayScript)) {
           const tray = spawn(
             "powershell",
@@ -186,7 +186,7 @@ async function spawnTray(): Promise<number> {
           tray.unref();
           console.log("[tray] Icon tray Windows da mo (menu: Mo ZCode / Kiem tra ngay / Mo log / Thoát).");
         } else {
-          console.log(`[tray] Khong tim thay tray.ps1 o ${trayScript}, daemon van chay nen nhung khong co icon tray.`);
+          console.log(`[tray] Khong tim thay run.ps1 o ${trayScript}, daemon van chay nen nhung khong co icon tray.`);
         }
       } else {
         console.log("[tray] He nay chua co menu tray goc: daemon chay nen + thong bao he thong, thoat bang --stop.");
