@@ -73,26 +73,28 @@ jobs:
           name: zcode-deal-linux-x64
           path: dist/zcode-deal
 
-  # Build that app tray Electron tren Windows (moi truong dich
-  # that), de bat loi chi lo ra tren Windows. Job nay khong chan
+  # Build app tray Go cho Windows (cross-build tu Ubuntu, khong
+  # can runner Windows) + test logic checker. Job nay khong chan
   # job check/build-exe, chi cung cap artifact de test tren Windows.
-  tray-app:
-    runs-on: windows-latest
+  tray-go:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-go@v5
         with:
-          node-version: "22"
+          go-version: "1.23"
 
-      - name: Build app tray Electron (Windows)
-        working-directory: tray-app
-        run: |
-          npm install --no-audit --no-fund
-          npm run pack:win
+      - name: Test logic checker
+        working-directory: tray-go
+        run: go test ./internal/...
 
-      - name: Upload ban dong goi Windows
+      - name: Build exe Windows
+        working-directory: tray-go
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal-tray.exe .
+
+      - name: Upload exe Windows
         uses: actions/upload-artifact@v7
         with:
           name: zcode-deal-tray-windows-x64
-          path: tray-app/dist-app/*.zip
+          path: tray-go/dist/zcode-deal-tray.exe

@@ -5,8 +5,8 @@ name: Release
 #   git push origin v0.1.0
 # Workflow nay se build zcode-deal.exe (Windows x64) va zcode-deal
 # (Linux x64) bang Bun compile, roi tao GitHub Release mang ten tag
-# va dinh kem ca 2 file + ban dong goi Windows cua app tray
-# Electron (job release-electron chay tren windows-latest).
+# va dinh kem ca 2 file + exe Windows cua app tray Go
+# (job release-gotray, cross-build tu Ubuntu).
 # Cung co the chay thu cong tu tab Actions (workflow_dispatch) voi
 # input tag, vi du v0.1.0.
 
@@ -59,23 +59,20 @@ jobs:
               dist/zcode-deal.exe dist/zcode-deal
           fi
 
-  release-electron:
-    runs-on: windows-latest
+  release-gotray:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-go@v5
         with:
-          node-version: "22"
+          go-version: "1.23"
 
-      - name: Build app tray Electron (Windows)
-        working-directory: tray-app
-        run: |
-          npm install --no-audit --no-fund
-          npm run pack:win
-          Get-ChildItem dist-app -Recurse -Name | Select-Object -First 20
+      - name: Build app tray Go (Windows)
+        working-directory: tray-go
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal-tray.exe .
 
-      - name: Dinh kem ban dong goi Windows vao release
+      - name: Dinh kem exe Windows vao release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -93,7 +90,7 @@ jobs:
             sleep 20
           done
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" --clobber tray-app/dist-app/*.zip
+            gh release upload "$TAG" --clobber tray-go/dist/zcode-deal-tray.exe
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes tray-app/dist-app/*.zip
+            gh release create "$TAG" --title "$TAG" --generate-notes tray-go/dist/zcode-deal-tray.exe
           fi

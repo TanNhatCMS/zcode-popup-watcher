@@ -38,7 +38,7 @@ Cần có [Bun](https://bun.sh).
 | `popup-watcher.ts` | Nhắc theo khung giờ: thông báo một lần mỗi ngày trong khung 17:55–22:10 giờ VN cho deal đêm. Không gọi API. |
 | `zcode-config.ts` | Đọc config ở `~/.zcode/v2` (xem bên dưới). |
 | `notify.ts` | Thông báo hệ thống: macOS dùng `osascript`, Linux dùng `notify-send`, Windows dùng MessageBox, không có công cụ nào thì in ra console. |
-| `tray-app/` | App tray Electron cho Windows (icon + menu native, cửa sổ React hiện trạng thái). Thay thế `run.ps1` đã bỏ. |
+| `tray-go/` | App tray Go cho Windows (icon + menu native qua lib systray, file exe duy nhất ~10MB). Thay thế `run.ps1` và app Electron đã bỏ. |
 
 ```sh
 bun run src/deal-checker.ts --once
@@ -72,35 +72,36 @@ bun run build:exe:linux  # Linux x64 -> dist/zcode-deal
 ./dist/zcode-deal tray --open
 ```
 
-Trên Windows, icon tray do app Electron trong `tray-app/` vẽ
-(icon + menu native, không qua PowerShell nên không còn lỗi ký,
-không còn lỗi enum WinForms như `run.ps1` trước đây). Build app:
+Trên Windows, icon tray do app Go trong `tray-go/` vẽ (lib
+systray native, không qua PowerShell nên không còn lỗi ký, không
+còn lỗi enum WinForms như `run.ps1` trước đây, và không còn
+Chromium 126MB như app Electron trước đó). Build app:
 ```
-cd tray-app
-npm install
-npm run pack:win
+cd tray-go
+GOOS=windows go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal-tray.exe .
 ```
-File exe nằm ở `tray-app/dist-app/win-unpacked/ZCode Deal Tray.exe`.
+File exe duy nhất ~10MB ở `tray-go/dist/zcode-deal-tray.exe`.
 Chạy nó là có icon tray ngay (app tự poll deal, không cần daemon
 Bun). Lệnh `zcode-deal tray` trên Windows cũng mở app này nếu đã
-build (nó tìm file exe trong `tray-app/dist-app/`). Các lệnh còn
-lại (`check`, `status`, `stop`, `reminder`) chỉ cần mỗi file exe
-Bun. Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
+build (nó tìm file exe trong `tray-go/dist/`). Các lệnh còn lại
+(`check`, `status`, `stop`, `reminder`) chỉ cần mỗi file exe Bun.
+Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
 
 Không thấy icon trong tray thì kiểm tra theo thứ tự này
 (daemon Bun chạy không đồng nghĩa app tray đã mở, vì app tray
-Electron là một process riêng):
-1. App Electron đã build chưa? `zcode-deal tray` trên Windows sẽ
-   báo lỗi rõ ràng nếu chưa build, thay vì âm thầm chạy daemon
-   không icon như bản cũ. Build theo hướng dẫn ở trên.
+Go là một process riêng):
+1. App Go đã build chưa? `zcode-deal tray` trên Windows sẽ báo
+   lỗi rõ ràng nếu chưa build, thay vì âm thầm chạy daemon không
+   icon như bản cũ. Build theo hướng dẫn ở trên.
 2. Icon có bị Windows giấu trong vùng overflow (mũi tên `^` ở góc
    phải thanh tác vụ) không? Bấm `^` để xem, kéo icon ra ngoài nếu
-   muốn hiện luôn. Icon là hình chuông vàng có chấm xanh, bấm trái
-   vào icon mở bảng điều khiển React, bấm phải mở menu.
-3. Chạy `zcode-deal status` và xem dòng `App tray Electron`: nếu
-   báo `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
+   muốn hiện luôn. Icon là hình chuông vàng có chấm xanh, bấm phải
+   mở menu; khi có deal icon đổi sang chuông chấm đỏ + hiện thông
+   báo, bấm vào mục deal trong menu để mở ZCode.
+3. Chạy `zcode-deal status` và xem dòng `App tray Go`: nếu báo
+   `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
    `KHÔNG chạy` thì app chưa từng chạy hoặc đã thoát, xem log
-   `~/.zcode/mod/deal-checker.log` dòng bắt đầu bằng `[electron]`.
+   `~/.zcode/mod/deal-checker.log` dòng bắt đầu bằng `[gotray]`.
 
 CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
 request (job `build-exe`): vào tab Actions của repo, mở run tương
@@ -128,25 +129,23 @@ daemon trùng. State chỉ nằm ở `~/.zcode/mod`, code không đọc các
 thư mục cũ nữa — nếu còn daemon bản cũ đang chạy, hãy dừng nó trước
 rồi xoá hẳn các thư mục cũ cho gọn.
 
-Trên **Windows**, icon tray do app Electron trong `tray-app/`
-vẽ, menu native với các mục sau (hiện tiếng Việt có dấu, vì
-Electron không bị giới hạn encoding của PowerShell 5.1 như
-`run.ps1` trước đây):
+Trên **Windows**, icon tray do app Go trong `tray-go/` vẽ
+(lib systray native), menu với các mục sau (hiện tiếng Việt có
+dấu):
 
 - **Mở ZCode** — mở app ZCode (chỉ mở khi thật sự tìm thấy file thực
   thi; các đường dẫn cài đặt thường gặp được kiểm tra trước).
 - **Kiểm tra ngay** — app kiểm tra lại ngay thay vì chờ đủ chu kỳ
   600 giây.
-- **Mở bảng điều khiển** — mở cửa sổ React hiện trạng thái check
-  cuối, số deal đã thấy và log cuối.
 - **Mở log** — mở log của app bằng Notepad.
 - **Thoát** — thoát app tray.
 
-Bấm trái vào icon cũng mở bảng điều khiển React. App Electron tự
-poll deal (không cần daemon Bun), dùng chung thư mục state
-`~/.zcode/mod` với CLI nên deal đã thấy sẽ không bị báo lại.
-Đừng chạy song song daemon Bun và app Electron: mỗi bên chỉ đọc
-seen file một lần lúc khởi động nên có thể báo trùng một deal.
+Khi có deal, icon đổi sang chuông chấm đỏ, hiện thông báo hệ thống
+và menu xuất hiện thêm mục deal ở trên cùng (bấm vào để mở ZCode).
+App Go tự poll deal (không cần daemon Bun), dùng chung thư mục
+state `~/.zcode/mod` với CLI nên deal đã thấy sẽ không bị báo lại.
+Đừng chạy song song daemon Bun và app Go: mỗi bên chỉ đọc seen
+file một lần lúc khởi động nên có thể báo trùng một deal.
 
 Khi có deal, tray hiện thông báo dạng bong bóng từ file notify;
 **bấm vào bong bóng sẽ mở ZCode**, để bạn nhận deal trong app chính
@@ -154,13 +153,12 @@ thức. Với `--open`, daemon tự mở ZCode ngay khi phát hiện deal, khôn
 cần chờ bạn bấm.
 
 Trên **macOS/Linux**, daemon Bun vẫn chạy tách rời kèm thông báo
-hệ thống, và `--stop` là cách để thoát. Muốn có icon tray thì chạy
-app Electron trong `tray-app/` (build Linux: `npm run build` rồi
-dùng electron-builder target linux, hoặc tải artifact từ CI).
-App tray Electron chưa chạy thật được trên máy test Linux headless,
-nên hãy xác nhận trên Windows rằng icon và menu có hiện ra không —
-phía daemon (tách tiến trình, PID, log, file notify, trigger, stop)
-thì đã được kiểm chứng.
+hệ thống, và `--stop` là cách để thoát. App Go cũng build được cho
+Linux/macOS (`go build`), nhưng icon tray trên Linux cần GTK nên
+chưa kiểm chứng trên máy headless; Windows là mục tiêu chính, hãy
+xác nhận trên Windows rằng icon và menu có hiện ra không — phía
+daemon (tách tiến trình, PID, log, file notify, trigger, stop) thì
+đã được kiểm chứng.
 
 ## Đọc config từ `~/.zcode/v2`
 
@@ -198,11 +196,10 @@ workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
 - `bun run test:watcher` — popup-watcher ở chế độ `--test`
   (báo ngay, không chờ khung giờ).
 - `bun run src/cli.ts self-test` — kiểm tra CLI dispatch đúng lệnh.
-- Job `tray-app` (Windows): build app Electron trong `tray-app/`
-  và đóng gói Windows (`dir` + `zip`), upload làm artifact — đây
-  là cách bắt lỗi chỉ lộ ra lúc chạy thật trên Windows (bài học
-  từ vụ `run.ps1` trước đây: parse cú pháp không bắt được lỗi
-  enum WinForms).
+- Job `tray-go`: build app Go cho Windows (`GOOS=windows go
+  build`) và chạy `go test ./internal/...`, upload exe làm
+  artifact — Go cross-build từ Ubuntu nên không cần runner
+  Windows, khác với app Electron trước đây.
 - Job `build-exe` — build `zcode-deal.exe` (Windows x64, cross-compile
   từ Ubuntu) và `zcode-deal` (Linux x64) rồi upload làm artifact.
 
@@ -210,10 +207,10 @@ Ngoài ra còn có workflow `.github/workflows/release.yml` riêng cho
 phát hành: push một tag dạng `v*` (ví dụ `git tag v1.0.0 &&
 git push origin v1.0.0`) hoặc chạy thủ công từ tab Actions với input
 tag, workflow sẽ build hai file trên và tạo GitHub Release mang tên
-tag đó, đính kèm `zcode-deal.exe`, `zcode-deal` và bản đóng gói
-Windows của app tray Electron (file zip, giải nén ra là chạy
-`ZCode Deal Tray.exe`, không cần thêm script nào). Chạy lại cùng tag
-thì file cũ được ghi đè, không tạo release trùng.
+tag đó, đính kèm `zcode-deal.exe`, `zcode-deal` và file exe duy
+nhất của app tray Go cho Windows (`zcode-deal-tray.exe`, ~10MB,
+chạy trực tiếp không cần thêm file nào). Chạy lại cùng tag thì
+file cũ được ghi đè, không tạo release trùng.
 
 Chạy đúng các bước đó ở local bằng một lệnh: `bun run check`.
 

@@ -7,9 +7,9 @@
 // Build thanh file chạy đọc lap (không cần cái Bun trên máy đích):
 //   bun run build:exe        # Windows x64 -> dist/zcode-deal.exe
 //   bun run build:exe:linux  # Linux x64 -> dist/zcode-deal
-// Icon tray tren Windows do app Electron trong tray-app/ ve
-// (native Tray/Menu + cua so React), khong dung PowerShell nua.
-// Lenh tray tren Windows mo app Electron do (can build truoc).
+// Icon tray tren Windows do app Go trong tray-go/ ve (lib
+// systray native), khong dung PowerShell nua. Lenh tray tren
+// Windows mo app Go do (can build truoc).
 //
 // CLI này chỉ BÁO deal, không tự nhận thay bạn. Xem README.md.
 
@@ -33,14 +33,14 @@ Lệnh:
   watch [tùy chọn như check]
       Giống check (poll liên tục).
   tray [--interval GIÂY] [--config-dir DIR] [--open]
-      Trên Windows: mở app tray Electron (tray-app/, cần build
-      trước bằng npm run pack:win). Ngoài Windows: chạy daemon
+      Trên Windows: mở app tray Go (tray-go/, cần build trước
+      bằng GOOS=windows go build). Ngoài Windows: chạy daemon
       tách rời, lệnh thoát ngay, tắt được terminal.
   status
-      Daemon Bun / app tray Electron có đang chạy không? Xem vài
+      Daemon Bun / app tray Go có đang chạy không? Xem vài
       dòng log cuối.
   stop
-      Dừng daemon Bun (app tray Electron thoát bằng menu Thoát
+      Dừng daemon Bun (app tray Go thoát bằng menu Thoát
       trong tray).
   reminder [--from HH:MM] [--to HH:MM] [--open]
       Nhắc theo khung giờ deal đêm (mặc định 17:55-22:10 giờ VN),
