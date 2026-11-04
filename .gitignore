@@ -1,2 +1,4 @@
 node_modules/
 dist/
+tray-app/dist-app/
+tray-app/assets/media-generation-*

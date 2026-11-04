@@ -29,7 +29,8 @@
 //   bun run src/deal-checker.ts --tray          # tách daemon + icon tray, lệnh thoát ngay
 //   bun run src/deal-checker.ts --status        # xem daemon có đang chạy không
 //   bun run src/deal-checker.ts --stop          # thoát daemon (tương đương nút Thoát trong tray)
-//   Trên Windows, --tray con mở run.ps1: icon tray có menu
+//   Trên Windows, --tray mo app tray Electron (tray-app/):
+//   icon tray + menu native + cua so React.
 //   "Mở ZCode", "Kiểm tra ngay", "Mở log", "Thoát". Bấm vào bong
 //   thông báo deal cũng mở ZCode. Trên macOS/Linux chứa có menu tray
 //   gốc (cần Swift/AppIndicator riêng), daemon vẫn chạy nên, báo bằng
@@ -58,7 +59,7 @@ const DEFAULT_INTERVAL_MS = 600_000;
 const STATE_DIR = join(homedir(), ".zcode", "mod");
 const SEEN_FILE = join(STATE_DIR, "seen_deals.json");
 const PID_FILE = join(STATE_DIR, "deal-checker.pid");
-const TRAY_PID_FILE = join(STATE_DIR, "tray.pid");
+const ELECTRON_PID_FILE = join(STATE_DIR, "electron-tray.pid");
 const LOG_FILE = join(STATE_DIR, "deal-checker.log");
 const NOTIFY_FILE = join(STATE_DIR, "deal-notify.json");
 const TRIGGER_FILE = join(STATE_DIR, "check-now.trigger");
@@ -138,17 +139,28 @@ function isBunRunner(): boolean {
   return base === "bun" || base === "bun.exe" || base.startsWith("bun-");
 }
 
-// Thư mục chứa run.ps1: bản compile thì cùng thư mục với file exe
-// (user copy run.ps1 kèm exe); bản bun thì run.ps1 nằm ở gốc repo,
-// tức thư mục cha của src/ (nơi chứa deal-checker.ts).
-function appDir(): string {
+// Goc repo: ban bun thi thu muc cha cua src/, ban compile thi
+// thu muc chua file exe (khi user copy exe kem thu muc tray-app).
+function repoRoot(): string {
   if (!isBunRunner()) return dirname(process.execPath);
   const script = scriptPath();
-  return script ? dirname(script) : dirname(process.execPath);
+  return script ? dirname(dirname(script)) : dirname(process.execPath);
 }
 
-function findTrayScript(): string | null {
-  const candidates = [join(appDir(), "run.ps1"), join(appDir(), "..", "run.ps1")];
+// Tim file exe cua app Electron (tray-app). Thu tu uu tien:
+// build cuc bo trong repo, roi file exe dat canh exe Bun.
+function findElectronApp(): string | null {
+  const root = repoRoot();
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    candidates.push(join(root, "tray-app", "dist-app", "win-unpacked", "ZCode Deal Tray.exe"));
+    candidates.push(join(root, "ZCode Deal Tray.exe"));
+    candidates.push(join(dirname(process.execPath), "ZCode Deal Tray.exe"));
+  } else if (process.platform === "darwin") {
+    candidates.push(join(root, "tray-app", "dist-app", "mac", "ZCode Deal Tray.app"));
+  } else {
+    candidates.push(join(root, "tray-app", "dist-app", "linux-unpacked", "zcode-deal-tray"));
+  }
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
@@ -188,72 +200,54 @@ function printTrayHelp(): void {
   }
 }
 
-// Mở icon tray Windows nếu chứa có. PID của powershell được ghi
-// vào tray.pid ngay khi spawn, run.ps1 tự xoá file khi thoát;
-// PID chet thì lần chạy sau spawn lại, không tạo 2 icon.
-function spawnTrayUI(): void {
-  if (process.platform !== "win32") return;
-  const existingTray = readPidFrom(TRAY_PID_FILE);
+// Mở app tray Electron (thay run.ps1 đã bỏ). App Electron tự
+// poll deal + ve icon/menu native, không phụ thuộc daemon Bun.
+// Trả về 0 nếu đã mở (hoặc đã chạy rồi), 2 nếu không tìm thấy app.
+function launchElectronTray(): number {
+  const existingTray = readPidFrom(ELECTRON_PID_FILE);
   if (existingTray && pidAlive(existingTray)) {
-    console.log(`[tray] Icon tray đã chạy rồi (PID ${existingTray}).`);
-    appendLog(`[tray] Icon tray đã chạy rồi (PID ${existingTray}).`);
-    return;
+    console.log(`[tray] App tray Electron đã chạy rồi (PID ${existingTray}).`);
+    return 0;
   }
-  const trayScript = findTrayScript();
-  if (!trayScript) {
-    // Lỗi này trước đây chỉ in ra console rồi cửa sổ tắt mất nên
-    // user không thấy: ghi thêm vào log để status đọc được.
-    const message = `[tray] Không tìm thấy run.ps1 ở ${appDir()} (hoặc thư mục cha), daemon vẫn chạy nền nhưng không có icon tray. Tải run.ps1 từ Release về cùng thư mục với exe rồi chạy lại lệnh tray.`;
-    console.log(message);
+  const appExe = findElectronApp();
+  if (!appExe) {
+    const message = `[tray] Không tìm thấy app tray Electron. Build nó trước: cd tray-app && npm install && npm run pack:win, rồi chạy lại lệnh tray (file exe nằm ở tray-app/dist-app/win-unpacked/ZCode Deal Tray.exe). Hoặc tải bản đóng gói từ Release.`;
+    console.error(message);
     appendLog(message);
-    return;
+    return 2;
   }
   try {
-    const tray = spawn(
-      "powershell",
-      [
-        "-NoProfile",
-        "-WindowStyle",
-        "Hidden",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        trayScript,
-        "-PidFile",
-        PID_FILE,
-        "-NotifyFile",
-        NOTIFY_FILE,
-        "-TriggerFile",
-        TRIGGER_FILE,
-        "-LogFile",
-        LOG_FILE,
-        "-TrayPidFile",
-        TRAY_PID_FILE,
-      ],
-      { detached: true, stdio: "ignore" },
-    );
-    tray.unref();
-    if (tray.pid) {
-      try {
-        writeFileSync(TRAY_PID_FILE, String(tray.pid), "utf-8");
-      } catch {
-        // Bỏ qua, lần sau sẽ spawn lại nếu không thấy PID sống.
-      }
-    }
-    console.log("[tray] Icon tray Windows đã mở (menu: Mở ZCode / Kiểm tra ngay / Mở log / Thoát).");
-    appendLog(`[tray] Icon tray Windows đã mở (script: ${trayScript}, powershell PID: ${tray.pid ?? "?"}).`);
+    const child = spawn(appExe, [], { detached: true, stdio: "ignore" });
+    child.unref();
+    console.log(`[tray] Đã mở app tray Electron: ${appExe}`);
+    console.log("[tray] Menu tray: Mở ZCode / Kiểm tra ngay / Mở bảng điều khiển / Mở log / Thoát. Bấm vào icon để mở bảng điều khiển React.");
+    appendLog(`[tray] Đã mở app tray Electron: ${appExe}.`);
+    return 0;
   } catch (error) {
-    console.error(`[tray] Không mở được icon tray: ${error}`);
-    appendLog(`[tray] Không mở được icon tray: ${error}`);
+    console.error(`[tray] Không mở được app tray Electron: ${error}`);
+    appendLog(`[tray] Không mở được app tray Electron: ${error}`);
+    return 1;
   }
 }
 
 async function spawnTray(cliArgs: string[]): Promise<number> {
   ensureStateDir();
+  // Windows: tray gio la app Electron, khong dung daemon Bun nua.
+  // Neu app Electron chua build thi bao loi ro rang, khong am tham
+  // chay daemon khong icon nhu ban cu (goc cua vu "daemon chay
+  // ma khong thay icon" truoc day).
+  if (process.platform === "win32") {
+    const daemon = readPidFile();
+    if (daemon && pidAlive(daemon)) {
+      console.log(`[tray] Canh bao: daemon Bun dang chay (PID ${daemon}). App Electron dung chung seen file nhung moi ben chi doc seen 1 lan luc khoi dong, nen chay song song co the bao trung 1 deal. Nen chay 'zcode-deal stop' truoc khi dung app Electron.`);
+    }
+    return launchElectronTray();
+  }
+  const electronApp = findElectronApp();
+  if (electronApp) return launchElectronTray();
   const existing = readPidFile();
   if (existing && pidAlive(existing)) {
     console.log(`[tray] Daemon đã chạy rồi (PID ${existing}).`);
-    spawnTrayUI();
     printTrayHelp();
     return 0;
   }
@@ -279,11 +273,7 @@ async function spawnTray(cliArgs: string[]): Promise<number> {
     if (pid && pidAlive(pid)) {
       console.log(`[tray] Daemon đã chạy (PID ${pid}). Bạn có thể tắt của số terminal này.`);
       console.log(`[tray] Log: ${LOG_FILE}`);
-      if (process.platform === "win32") {
-        spawnTrayUI();
-      } else {
-        console.log("[tray] He này chứa có menu tray gốc: daemon chạy nên + thông báo hệ thống, thoát bằng --stop.");
-      }
+      console.log("[tray] He này chứa có menu tray gốc: daemon chạy nên + thông báo hệ thống, thoát bằng --stop. Muốn có icon tray thi dung app Electron trong tray-app/.");
       printTrayHelp();
       return 0;
     }
@@ -334,7 +324,7 @@ async function handleStop(): Promise<number> {
   } catch {
     // Daemon con cùng tự xoá PID file khi thoát.
   }
-  console.log(`[tray] Đã thoát daemon (PID ${pid}). Trên Windows, icon tray sẽ tự biến mất khi thấy PID file mất.`);
+  console.log(`[tray] Đã thoát daemon (PID ${pid}). App tray Electron (nếu đang chạy) không bị ảnh hưởng, thoát bằng menu Thoát trong tray.`);
   return 0;
 }
 
@@ -347,13 +337,13 @@ function handleStatus(): number {
   } else {
     console.log("[tray] Daemon KHÔNG chạy.");
   }
-  const trayPid = readPidFrom(TRAY_PID_FILE);
+  const trayPid = readPidFrom(ELECTRON_PID_FILE);
   if (trayPid && pidAlive(trayPid)) {
-    console.log(`[tray] Icon tray Windows ĐANG CHẠY (powershell PID ${trayPid}).`);
+    console.log(`[tray] App tray Electron ĐANG CHẠY (PID ${trayPid}).`);
   } else if (trayPid) {
-    console.log(`[tray] tray.pid còn ${trayPid} nhưng tiến trình đã chết (stale) - icon tray không còn, chạy lại lệnh tray để mở lại.`);
+    console.log(`[tray] electron-tray.pid còn ${trayPid} nhưng tiến trình đã chết (stale) - app tray không còn, chạy lại lệnh tray để mở lại.`);
   } else {
-    console.log("[tray] Icon tray Windows KHÔNG chạy (không có tray.pid). Trên Windows, kiểm tra run.ps1 có nằm cùng thư mục với exe không, và icon có bị giấu trong vùng overflow (^) không.");
+    console.log("[tray] App tray Electron KHÔNG chạy (không có electron-tray.pid). Chạy lệnh tray để mở app (cần build tray-app trước).");
   }
   let logText: string | null = null;
   try {

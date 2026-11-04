@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "description": "Tray app cho ZCode Deal Watcher: icon tray + menu native (Electron) + cua so React hien trang thai deal. Thay the run.ps1.",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0",
+    "electron": "^37.0.0"
+  },
+  "main": "dist/main/main.js",
+  "name": "zcode-deal-tray",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "pack:win": "npm run build && electron-builder --win dir zip",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "version": "1.0.0"
+}
