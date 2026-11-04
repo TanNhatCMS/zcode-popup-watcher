@@ -1,4 +1,2 @@
-node_modules/
 dist/
-tray-go/dist/
-tray-go/assets/media-generation-*
+assets/media-generation-*
