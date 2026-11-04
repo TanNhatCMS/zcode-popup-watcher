@@ -30,17 +30,17 @@ TypeScript + Bun only. No dependencies, no install step. Requires [Bun](https://
 
 | File | What it does |
 | --- | --- |
-| `bun/deal-checker.ts` | Polls `marketing/touch` every 600s (the production client's interval), shows a native notification when a new delivery appears. |
-| `bun/popup-watcher.ts` | Time-window reminder: notifies once a day in the 17:55–22:10 VN window for the nightly deal. No API calls. |
-| `bun/zcode-config.ts` | Reads `~/.zcode/v2` config (see below). |
-| `bun/notify.ts` | Native notifications: macOS `osascript`, Linux `notify-send`, Windows MessageBox, console fallback. |
+| `deal-checker.ts` | Polls `marketing/touch` every 600s (the production client's interval), shows a native notification when a new delivery appears. |
+| `popup-watcher.ts` | Time-window reminder: notifies once a day in the 17:55–22:10 VN window for the nightly deal. No API calls. |
+| `zcode-config.ts` | Reads `~/.zcode/v2` config (see below). |
+| `notify.ts` | Native notifications: macOS `osascript`, Linux `notify-send`, Windows MessageBox, console fallback. |
 
 ```sh
-bun run bun/deal-checker.ts --once
-bun run bun/deal-checker.ts            # background polling
-bun run bun/deal-checker.ts --self-test
-bun run bun/deal-checker.ts --dry-run  # config only, no API call
-bun run bun/popup-watcher.ts --test
+bun run deal-checker.ts --once
+bun run deal-checker.ts            # background polling
+bun run deal-checker.ts --self-test
+bun run deal-checker.ts --dry-run  # config only, no API call
+bun run popup-watcher.ts --test
 ```
 
 ## Reading config from `~/.zcode/v2`
