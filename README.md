@@ -34,6 +34,7 @@ TypeScript + Bun only. No dependencies, no install step. Requires [Bun](https://
 | `popup-watcher.ts` | Time-window reminder: notifies once a day in the 17:55–22:10 VN window for the nightly deal. No API calls. |
 | `zcode-config.ts` | Reads `~/.zcode/v2` config (see below). |
 | `notify.ts` | Native notifications: macOS `osascript`, Linux `notify-send`, Windows MessageBox, console fallback. |
+| `tray.ps1` | Windows system-tray icon for the background daemon (see below). Not used on other OSes. |
 
 ```sh
 bun run deal-checker.ts --once
@@ -42,6 +43,48 @@ bun run deal-checker.ts --self-test
 bun run deal-checker.ts --dry-run  # config only, no API call
 bun run popup-watcher.ts --test
 ```
+
+## Tray / background mode (one command, terminal can be closed)
+
+```sh
+bun run deal-checker.ts --tray      # start detached daemon + tray icon, command exits at once
+bun run deal-checker.ts --tray --open   # same, but auto-open ZCode when a deal appears
+bun run deal-checker.ts --status    # is the daemon running? last log lines
+bun run deal-checker.ts --stop      # stop the daemon (same as Exit in the tray menu)
+```
+
+How it works: `--tray` spawns a detached Bun child (`--tray-child`)
+and exits immediately, so the terminal window can be closed. The
+child polls, writes its log to
+`~/.zcode_popup_watcher/deal-checker.log`, records its PID in
+`~/.zcode_popup_watcher/deal-checker.pid`, and writes each new deal
+to `~/.zcode_popup_watcher/deal-notify.json` (campaign keys, title
+and message only — never the token). A second `--tray` while one is
+running refuses to start a duplicate.
+
+On **Windows**, `--tray` also launches `tray.ps1`, which shows a
+system-tray icon with this menu:
+
+- **Mo ZCode** — opens the ZCode app (only if the executable is
+  actually found; common install paths are checked first).
+- **Kiem tra ngay** — writes a trigger file; the daemon checks
+  within ~2 seconds instead of waiting for the next 600s interval.
+- **Mo log** — opens the daemon log in Notepad.
+- **Thoat** — kills the daemon and closes the tray icon.
+
+When a deal appears, the tray shows a balloon notification from the
+notify file; **clicking the balloon opens ZCode**, so you can claim
+inside the official app. With `--open`, the daemon opens ZCode
+automatically as soon as a deal is found, without waiting for a click.
+
+On **macOS/Linux** there is no native tray menu yet (that would
+need a Swift menu-bar app or a Linux AppIndicator helper): the
+daemon still runs detached with system notifications, and `--stop`
+is the way to exit. The tray icon itself, including
+`tray.ps1`, could not be executed on the headless Linux test
+machine, so please confirm on Windows that the icon and its menu
+appear — the daemon side (spawn, PID, log, notify file, trigger,
+stop) was verified there.
 
 ## Reading config from `~/.zcode/v2`
 

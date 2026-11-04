@@ -7,6 +7,7 @@
 // Ham nay chi BAO, khong mo app, khong click gi trong ZCode.
 
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { platform } from "node:os";
 
 function escapeForAppleScript(text: string): string {
@@ -68,6 +69,8 @@ export function openZcode(): string {
     candidates.push("/usr/bin/zcode", "/usr/local/bin/zcode");
   }
   for (const target of candidates) {
+    // Chi goi mo khi file/app that su ton tai, khong doan mo.
+    if (!existsSync(target)) continue;
     try {
       if (os === "darwin") {
         spawn("open", [target], { detached: true, stdio: "ignore" }).unref();
