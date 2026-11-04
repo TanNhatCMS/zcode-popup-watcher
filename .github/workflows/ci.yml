@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Build
+        run: bun run build
+
+      - name: Test deal-checker (self-test, khong goi API)
+        run: bun run test
+
+      - name: Test popup-watcher (che do --test, khong cho khung gio)
+        run: bun run test:watcher
+
+      # Chi parse cu phap, khong chay code WinForms nen an toan tren Linux.
+      - name: Kiem tra cu phap run.ps1
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile('run.ps1', [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host 'run.ps1: syntax OK'

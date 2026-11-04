@@ -1,5 +1,7 @@
 # zcode-popup-watcher
 
+[![CI](https://github.com/TanNhatCMS/zcode-popup-watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/TanNhatCMS/zcode-popup-watcher/actions/workflows/ci.yml)
+
 Các tool theo dõi deal của ZCode và thông báo lên màn hình, để bạn
 tự nhận deal trong app ZCode chính thức.
 
@@ -117,6 +119,22 @@ Checker đọc, trên cùng máy và cùng user với ZCode:
     in ra token có hay không và `deviceMid` đã che bớt.
 
 Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
+
+## Kiểm tra tự động (CI)
+
+Mỗi lần push lên `main` hoặc mở pull request, GitHub Actions chạy
+workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
+
+- `bun run build` — build `deal-checker.ts` và `popup-watcher.ts`
+  ra `dist/` bằng Bun, để bắt lỗi cú pháp/import hỏng.
+- `bun run test` — self-test của deal-checker (chỉ parse snapshot
+  mẫu, không gọi API thật, không cần token).
+- `bun run test:watcher` — popup-watcher ở chế độ `--test`
+  (báo ngay, không chờ khung giờ).
+- Parse cú pháp `run.ps1` bằng PowerShell (chỉ parse, không chạy
+  code WinForms nên an toàn trên Linux).
+
+Chạy đúng các bước đó ở local bằng một lệnh: `bun run check`.
 
 ## Kỷ luật polling
 
