@@ -75,38 +75,47 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return args;
 }
 
-const args = parseArgs(process.argv.slice(2));
-const fromMinutes = toMinutes(typeof args.from === "string" ? args.from : "17:55");
-const toMinutesValue = toMinutes(typeof args.to === "string" ? args.to : "22:10");
-const autoOpen = Boolean(args.open);
+// Ham chinh, dung duoc ca khi chay truc tiep va khi duoc cli.ts goi.
+export async function runPopupWatcher(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const args = parseArgs(argv);
+  const fromMinutes = toMinutes(typeof args.from === "string" ? args.from : "17:55");
+  const toMinutesValue = toMinutes(typeof args.to === "string" ? args.to : "22:10");
+  const autoOpen = Boolean(args.open);
 
-function showReminder(): void {
-  const message = [
-    "Toi gio nhan deal dem ZCode!",
-    "",
-    "1. Mo ZCode.",
-    "2. Bam banner/modal deal dem trong app.",
-    "3. Tu 22:00 moi dung duoc, toi 08:00 sang hom sau reset.",
-    "4. Nho chon dung GLM-5.3-Flash + Global Building.",
-    "",
-    "Tool nay chi bao, khong tu bam nhan thay ban.",
-  ].join("\n");
-  notify("ZCode - Toi gio nhan deal dem!", message);
-  console.log(message);
-  if (autoOpen) console.log(openZcode());
-}
+  const showReminder = (): void => {
+    const message = [
+      "Toi gio nhan deal dem ZCode!",
+      "",
+      "1. Mo ZCode.",
+      "2. Bam banner/modal deal dem trong app.",
+      "3. Tu 22:00 moi dung duoc, toi 08:00 sang hom sau reset.",
+      "4. Nho chon dung GLM-5.3-Flash + Global Building.",
+      "",
+      "Tool nay chi bao, khong tu bam nhan thay ban.",
+    ].join("\n");
+    notify("ZCode - Toi gio nhan deal dem!", message);
+    console.log(message);
+    if (autoOpen) console.log(openZcode());
+  };
 
-if (args.test) {
-  showReminder();
-  process.exit(0);
-}
-
-console.log(`[watcher] Dang chay nen. Se bao trong khung ${args.from || "17:55"}-${args.to || "22:10"} gio VN, 1 lan/ngay.`);
-while (true) {
-  const now = vnHourMinute();
-  if (loadNotifiedDate() !== now.date && now.minutes >= fromMinutes && now.minutes <= toMinutesValue) {
+  if (args.test) {
     showReminder();
-    saveNotifiedDate(now.date);
+    return;
   }
-  await Bun.sleep(60_000);
+
+  console.log(`[watcher] Dang chay nen. Se bao trong khung ${args.from || "17:55"}-${args.to || "22:10"} gio VN, 1 lan/ngay.`);
+  while (true) {
+    const now = vnHourMinute();
+    if (loadNotifiedDate() !== now.date && now.minutes >= fromMinutes && now.minutes <= toMinutesValue) {
+      showReminder();
+      saveNotifiedDate(now.date);
+    }
+    await Bun.sleep(60_000);
+  }
+}
+
+// Chi tu chay khi file nay la entrypoint. Khi cli.ts import thi
+// cli se goi runPopupWatcher() theo lenh cua user.
+if (import.meta.main) {
+  await runPopupWatcher();
 }

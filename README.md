@@ -33,6 +33,7 @@ Cần có [Bun](https://bun.sh).
 
 | File | Chức năng |
 | --- | --- |
+| `cli.ts` | Điểm vào duy nhất của CLI `zcode-deal` (xem mục CLI bên dưới). Các file dưới vẫn chạy trực tiếp được bằng Bun. |
 | `deal-checker.ts` | Poll `marketing/touch` mỗi 600 giây (đúng chu kỳ của client production), hiện thông báo hệ thống khi có delivery mới. |
 | `popup-watcher.ts` | Nhắc theo khung giờ: thông báo một lần mỗi ngày trong khung 17:55–22:10 giờ VN cho deal đêm. Không gọi API. |
 | `zcode-config.ts` | Đọc config ở `~/.zcode/v2` (xem bên dưới). |
@@ -46,6 +47,41 @@ bun run deal-checker.ts --self-test
 bun run deal-checker.ts --dry-run  # chỉ in cấu hình, không gọi API
 bun run popup-watcher.ts --test
 ```
+
+## CLI và file .exe (Bun compile)
+
+Không cần cài Bun trên máy đích: build bằng `bun build --compile`
+thành file chạy độc lập (runtime Bun đã nhúng trong file). File này
+vẫn đọc config `~/.zcode/v2` trên cùng máy/cùng user với ZCode như
+bản script, và state vẫn ở `~/.zcode/mod/`.
+
+```sh
+# Chạy CLI bằng Bun (không cần build)
+bun run cli.ts check --once
+bun run cli.ts tray --open
+bun run cli.ts status
+bun run cli.ts stop
+bun run cli.ts reminder --test
+bun run cli.ts self-test
+bun run cli.ts --help
+
+# Build file chạy độc lập
+bun run build:exe        # Windows x64 -> dist/zcode-deal.exe
+bun run build:exe:linux  # Linux x64 -> dist/zcode-deal
+./dist/zcode-deal check --once
+./dist/zcode-deal tray --open
+```
+
+Lưu ý cho bản `.exe` trên Windows: `run.ps1` là script riêng, không
+nhúng trong exe, nên muốn hiện icon tray thì copy `run.ps1` vào cùng
+thư mục với `zcode-deal.exe` rồi mới chạy `zcode-deal.exe tray`.
+Các lệnh còn lại (`check`, `status`, `stop`, `reminder`) chỉ cần
+mỗi file exe.
+
+CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
+request (job `build-exe`): vào tab Actions của repo, mở run tương
+ứng và tải artifact `zcode-deal-windows-x64` hoặc
+`zcode-deal-linux-x64` về dùng, không cần build ở local.
 
 ## Chế độ tray / chạy nền (một lệnh, tắt được terminal)
 
@@ -123,14 +159,17 @@ Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
 Mỗi lần push lên `main` hoặc mở pull request, GitHub Actions chạy
 workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
 
-- `bun run build` — build `deal-checker.ts` và `popup-watcher.ts`
-  ra `dist/` bằng Bun, để bắt lỗi cú pháp/import hỏng.
+- `bun run build` — build `cli.ts`, `deal-checker.ts` và
+  `popup-watcher.ts` ra `dist/` bằng Bun, để bắt lỗi cú pháp/import hỏng.
 - `bun run test` — self-test của deal-checker (chỉ parse snapshot
   mẫu, không gọi API thật, không cần token).
 - `bun run test:watcher` — popup-watcher ở chế độ `--test`
   (báo ngay, không chờ khung giờ).
+- `bun run cli.ts self-test` — kiểm tra CLI dispatch đúng lệnh.
 - Parse cú pháp `run.ps1` bằng PowerShell (chỉ parse, không chạy
   code WinForms nên an toàn trên Linux).
+- Job `build-exe` — build `zcode-deal.exe` (Windows x64, cross-compile
+  từ Ubuntu) và `zcode-deal` (Linux x64) rồi upload làm artifact.
 
 Chạy đúng các bước đó ở local bằng một lệnh: `bun run check`.
 

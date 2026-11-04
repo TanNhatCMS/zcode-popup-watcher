@@ -129,6 +129,22 @@ function scriptPath(): string {
   return main;
 }
 
+// Ban chay bang `bun run`: process.execPath la binary bun.
+// Ban compile (`bun build --compile`): process.execPath la chinh file exe.
+function isBunRunner(): boolean {
+  const exe = process.execPath || "";
+  const base = exe.split(/[\\/]/).pop() || "";
+  return base === "bun" || base === "bun.exe" || base.startsWith("bun-");
+}
+
+// Thu muc chua run.ps1: ban bun thi cung thu muc voi deal-checker.ts,
+// ban compile thi cung thu muc voi file exe (user copy run.ps1 kem exe).
+function appDir(): string {
+  if (!isBunRunner()) return dirname(process.execPath);
+  const script = scriptPath();
+  return script ? dirname(script) : dirname(process.execPath);
+}
+
 function forwardTrayArgs(original: string[]): string[] {
   // Chi chuyen cac tuy chon an toan sang daemon con; --tray tu no khong chuyen.
   const keep = new Set(["interval", "config-dir"]);
@@ -152,19 +168,26 @@ function forwardTrayArgs(original: string[]): string[] {
   return out;
 }
 
-async function spawnTray(): Promise<number> {
+async function spawnTray(cliArgs: string[]): Promise<number> {
   ensureStateDir();
   const existing = readPidFile();
   if (existing && pidAlive(existing)) {
     console.log(`[tray] Daemon da chay roi (PID ${existing}). Dung --status de xem, --stop de thoat.`);
     return 0;
   }
-  const script = scriptPath();
-  if (!script) {
-    console.error("[tray] LOI: khong xac dinh duoc duong dan script de tach daemon.");
-    return 2;
+  const forwarded = forwardTrayArgs(cliArgs);
+  let childArgs: string[];
+  if (isBunRunner()) {
+    const script = scriptPath();
+    if (!script) {
+      console.error("[tray] LOI: khong xac dinh duoc duong dan script de tach daemon.");
+      return 2;
+    }
+    childArgs = ["run", script, "--tray-child", ...forwarded];
+  } else {
+    // Ban compile: exe tu chay lenh an __tray-child (cli.ts dich thanh --tray-child).
+    childArgs = ["__tray-child", ...forwarded];
   }
-  const childArgs = ["run", script, "--tray-child", ...forwardTrayArgs(process.argv.slice(2))];
   const child = spawn(process.execPath, childArgs, { detached: true, stdio: "ignore", env: process.env });
   child.unref();
   // Cho daemon con ghi PID file roi moi ket luan.
@@ -175,7 +198,7 @@ async function spawnTray(): Promise<number> {
       console.log(`[tray] Daemon da chay (PID ${pid}). Ban co the tat cua so terminal nay.`);
       console.log(`[tray] Log: ${LOG_FILE}`);
       if (process.platform === "win32") {
-        const trayScript = join(dirname(script), "run.ps1");
+        const trayScript = join(appDir(), "run.ps1");
         if (existsSync(trayScript)) {
           const tray = spawn(
             "powershell",
@@ -206,7 +229,11 @@ async function spawnTray(): Promise<number> {
       } else {
         console.log("[tray] He nay chua co menu tray goc: daemon chay nen + thong bao he thong, thoat bang --stop.");
       }
-      console.log("[tray] Xem trang thai: bun run deal-checker.ts --status | Thoat: bun run deal-checker.ts --stop");
+      if (isBunRunner()) {
+        console.log("[tray] Xem trang thai: bun run deal-checker.ts --status | Thoat: bun run deal-checker.ts --stop");
+      } else {
+        console.log("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop");
+      }
       return 0;
     }
   }
@@ -542,8 +569,11 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return args;
 }
 
-async function main(): Promise<number> {
-  const args = parseArgs(process.argv.slice(2));
+// Ham chinh, dung duoc ca khi chay truc tiep (bun run deal-checker.ts)
+// va khi duoc cli.ts goi. argv mac dinh la process.argv.slice(2)
+// (dung cho ca ban bun va ban compile, vi argv[1] luon la script/exe).
+export async function runDealChecker(argv: string[] = process.argv.slice(2)): Promise<number> {
+  const args = parseArgs(argv);
   const configDir = getZcodeConfigDir(typeof args["config-dir"] === "string" ? args["config-dir"] : undefined);
   const intervalMs = args.interval ? Number(args.interval) * 1000 : DEFAULT_INTERVAL_MS;
   const locale = (process.env.ZCODE_LOCALE || "en-US") as string;
@@ -569,7 +599,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  if (args.tray) return await spawnTray();
+  if (args.tray) return await spawnTray(argv);
   if (args["tray-child"]) return await runTrayChild(args);
   if (args.stop) return await handleStop();
   if (args.status) return handleStatus();
@@ -640,4 +670,8 @@ async function main(): Promise<number> {
   }
 }
 
-process.exitCode = await main();
+// Chi tu chay khi file nay la entrypoint. Khi cli.ts import thi
+// cli se goi runDealChecker() theo lenh cua user.
+if (import.meta.main) {
+  process.exitCode = await runDealChecker();
+}
