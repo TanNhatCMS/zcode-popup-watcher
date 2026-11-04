@@ -52,10 +52,21 @@ import { notify, openZcode } from "./notify.ts";
 
 const API_URL = process.env.ZCODE_MARKETING_URL || "https://zcode.z.ai/api/v1/marketing/touch";
 const DEFAULT_INTERVAL_MS = 600_000;
-const STATE_DIR = join(homedir(), ".zcode_popup_watcher");
+// State cua watcher nam chung trong thu muc config cua ZCode cho gon,
+// khong de rieng 1 dotfolder o HOME nua:
+//   ~/.zcode/zcode-popup-watcher/{deal-checker.pid, deal-checker.log,
+//     deal-notify.json, check-now.trigger, seen_deals.json}
+// Cac ban cu de state o ~/.zcode_popup_watcher: PID va seen cu van
+// duoc doc (xem readPidFile/loadSeen) de khong chay trung daemon cu
+// va khong bao lai deal da thay; ghi moi chi ghi vao thu muc moi.
+const STATE_DIR = join(homedir(), ".zcode", "zcode-popup-watcher");
+const LEGACY_STATE_DIR = join(homedir(), ".zcode_popup_watcher");
 const SEEN_FILE = join(STATE_DIR, "seen_deals.json");
+const LEGACY_SEEN_FILE = join(LEGACY_STATE_DIR, "seen_deals.json");
 const PID_FILE = join(STATE_DIR, "deal-checker.pid");
+const LEGACY_PID_FILE = join(LEGACY_STATE_DIR, "deal-checker.pid");
 const LOG_FILE = join(STATE_DIR, "deal-checker.log");
+const LEGACY_LOG_FILE = join(LEGACY_STATE_DIR, "deal-checker.log");
 const NOTIFY_FILE = join(STATE_DIR, "deal-notify.json");
 const TRIGGER_FILE = join(STATE_DIR, "check-now.trigger");
 
@@ -76,12 +87,27 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function readPidFile(): number | null {
+function readPidFrom(path: string): number | null {
   try {
-    const pid = Number(readFileSync(PID_FILE, "utf-8").trim());
+    const pid = Number(readFileSync(path, "utf-8").trim());
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
+  }
+}
+
+function readPidFile(): number | null {
+  // Thu muc moi truoc, thu muc cu sau (daemon ban cu neu van chay).
+  return readPidFrom(PID_FILE) ?? readPidFrom(LEGACY_PID_FILE);
+}
+
+function removePidFilesIfMine(pid: number): void {
+  for (const path of [PID_FILE, LEGACY_PID_FILE]) {
+    try {
+      if (readPidFrom(path) === pid) unlinkSync(path);
+    } catch {
+      // Bo qua.
+    }
   }
 }
 
@@ -236,10 +262,13 @@ async function handleStop(): Promise<number> {
       // Bo qua.
     }
   }
-  try {
-    unlinkSync(PID_FILE);
-  } catch {
-    // Daemon con cung tu xoa PID file khi thoat.
+  // Xoa ca PID file moi va cu (neu co) de tray Windows thay mat la tu thoat.
+  for (const path of [PID_FILE, LEGACY_PID_FILE]) {
+    try {
+      unlinkSync(path);
+    } catch {
+      // Daemon con cung tu xoa PID file khi thoat.
+    }
   }
   console.log(`[tray] Da thoat daemon (PID ${pid}). Tren Windows, icon tray se tu bien mat khi thay PID file mat.`);
   return 0;
@@ -254,19 +283,24 @@ function handleStatus(): number {
   } else {
     console.log("[tray] Daemon KHONG chay.");
   }
+  let logText: string | null = null;
   try {
-    const lines = readFileSync(LOG_FILE, "utf-8").trim().split("\n").slice(-10);
-    console.log("[tray] 10 dong log cuoi:");
-    for (const line of lines) console.log(`  ${line}`);
+    logText = readFileSync(LOG_FILE, "utf-8");
   } catch {
+    try {
+      logText = readFileSync(LEGACY_LOG_FILE, "utf-8");
+    } catch {
+      logText = null;
+    }
+  }
+  if (logText !== null) {
+    console.log("[tray] 10 dong log cuoi:");
+    for (const line of logText.trim().split("\n").slice(-10)) console.log(`  ${line}`);
+  } else {
     console.log("[tray] Chua co log file.");
   }
-  try {
-    const seen = JSON.parse(readFileSync(SEEN_FILE, "utf-8"));
-    console.log(`[tray] Da thay ${Array.isArray(seen) ? seen.length : 0} deal (seen file).`);
-  } catch {
-    console.log("[tray] Chua co seen file.");
-  }
+  const seen = loadSeen();
+  console.log(`[tray] Da thay ${seen.size} deal (seen file, gom ca file cu neu co).`);
   return 0;
 }
 
@@ -311,11 +345,7 @@ async function runTrayChild(args: Record<string, string | boolean>): Promise<num
     appendLog(line);
   };
   const cleanup = (): void => {
-    try {
-      if (readPidFile() === process.pid) unlinkSync(PID_FILE);
-    } catch {
-      // Bo qua.
-    }
+    removePidFilesIfMine(process.pid);
   };
   process.on("SIGTERM", () => {
     log("[tray-child] Nhan SIGTERM, thoat.");
@@ -474,17 +504,23 @@ const SAMPLE_SNAPSHOT = {
 };
 
 function loadSeen(): Set<string> {
-  try {
-    const parsed = JSON.parse(readFileSync(SEEN_FILE, "utf-8"));
-    return Array.isArray(parsed) ? new Set(parsed as string[]) : new Set();
-  } catch {
-    return new Set();
+  const seen = new Set<string>();
+  for (const path of [SEEN_FILE, LEGACY_SEEN_FILE]) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf-8"));
+      if (Array.isArray(parsed)) {
+        for (const key of parsed as unknown[]) if (typeof key === "string") seen.add(key);
+      }
+    } catch {
+      // File khong co hoac hong: bo qua, khong lam hong vong poll.
+    }
   }
+  return seen;
 }
 
 function saveSeen(seen: Set<string>): void {
   try {
-    mkdirSync(join(homedir(), ".zcode_popup_watcher"), { recursive: true });
+    ensureStateDir();
     writeFileSync(SEEN_FILE, JSON.stringify([...seen].sort(), null, 2), "utf-8");
   } catch (error) {
     console.error(`[checker] khong ghi duoc seen file: ${error}`);

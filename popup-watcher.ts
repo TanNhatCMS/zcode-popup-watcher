@@ -14,7 +14,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { notify, openZcode } from "./notify.ts";
 
-const STATE_FILE = join(homedir(), ".zcode_popup_watcher", "popup-watcher-state.json");
+// State nam chung trong ~/.zcode cho gon, cung thu muc voi deal-checker.
+// Ban cu o ~/.zcode_popup_watcher van duoc doc 1 lan de khong bao lap.
+const STATE_DIR = join(homedir(), ".zcode", "zcode-popup-watcher");
+const STATE_FILE = join(STATE_DIR, "popup-watcher-state.json");
+const LEGACY_STATE_FILE = join(homedir(), ".zcode_popup_watcher", "popup-watcher-state.json");
 
 function vnHourMinute(): { date: string; minutes: number } {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -39,17 +43,20 @@ function toMinutes(hhmm: string): number {
 }
 
 function loadNotifiedDate(): string | null {
-  try {
-    const parsed = JSON.parse(readFileSync(STATE_FILE, "utf-8"));
-    return typeof parsed?.notifiedDate === "string" ? parsed.notifiedDate : null;
-  } catch {
-    return null;
+  for (const path of [STATE_FILE, LEGACY_STATE_FILE]) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf-8"));
+      if (typeof parsed?.notifiedDate === "string") return parsed.notifiedDate;
+    } catch {
+      // Thu file tiep theo.
+    }
   }
+  return null;
 }
 
 function saveNotifiedDate(date: string): void {
   try {
-    mkdirSync(join(homedir(), ".zcode_popup_watcher"), { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify({ notifiedDate: date }, null, 2), "utf-8");
   } catch (error) {
     console.error(`[watcher] khong ghi duoc state: ${error}`);
