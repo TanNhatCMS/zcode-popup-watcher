@@ -15,7 +15,7 @@
 import { runDealChecker } from "./deal-checker.ts";
 import { runPopupWatcher } from "./popup-watcher.ts";
 
-const VERSION = "0.1.0";
+const VERSION = "1.0.0";
 
 const HELP = `zcode-deal ${VERSION} - Theo doi deal ZCode, chi bao, khong tu nhan.
 

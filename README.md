@@ -180,8 +180,8 @@ workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
   từ Ubuntu) và `zcode-deal` (Linux x64) rồi upload làm artifact.
 
 Ngoài ra còn có workflow `.github/workflows/release.yml` riêng cho
-phát hành: push một tag dạng `v*` (ví dụ `git tag v0.1.0 &&
-git push origin v0.1.0`) hoặc chạy thủ công từ tab Actions với input
+phát hành: push một tag dạng `v*` (ví dụ `git tag v1.0.0 &&
+git push origin v1.0.0`) hoặc chạy thủ công từ tab Actions với input
 tag, workflow sẽ build hai file trên và tạo GitHub Release mang tên
 tag đó, đính kèm `zcode-deal.exe`, `zcode-deal` và `run.ps1` (đủ bộ
 để chạy tray trên Windows). Chạy lại cùng tag thì file cũ được ghi đè,
