@@ -28,7 +28,7 @@ jobs:
         run: bun run test:watcher
 
       - name: Test CLI (dispatch qua cli.ts)
-        run: bun run cli.ts self-test
+        run: bun run src/cli.ts self-test
 
       # Chi parse cu phap, khong chay code WinForms nen an toan tren Linux.
       - name: Kiem tra cu phap run.ps1

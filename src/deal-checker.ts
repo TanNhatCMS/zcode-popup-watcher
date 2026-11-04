@@ -1,47 +1,47 @@
 #!/usr/bin/env bun
-// deal-checker.ts -- Check deal ZCode bang Bun, doc config tu ~/.zcode/v2.
-// CHI DOC, KHONG NHAN HO.
+// deal-checker.ts -- Check deal ZCode bằng Bun, đọc config từ ~/.zcode/v2.
+// CHỈ ĐỌC, KHÔNG NHẬN HỘ.
 //
-// Luong chay:
-//   1. Doc ~/.zcode/v2/telemetry-state.json -> deviceMid.
-//   2. Doc ~/.zcode/v2/credentials.json -> giai ma key "zcodejwttoken"
-//      (xem zcode-config.ts). Token chi nam trong RAM, khong in, khong ghi file.
-//      Neu khong giai ma duoc (sai ZCODE_CREDENTIAL_SECRET, hoac chay
-//      khac user/may voi ZCode) thi tool dung lai, khong doan token.
+// Luong chạy:
+//   1. Đọc ~/.zcode/v2/telemetry-state.json -> deviceMid.
+//   2. Đọc ~/.zcode/v2/credentials.json -> giải mã key "zcodejwttoken"
+//      (xem zcode-config.ts). Token chỉ nằm trong RAM, không in, không ghi file.
+//      Nếu không giải mã được (sai ZCODE_CREDENTIAL_SECRET, hoặc chạy
+//      khác user/máy với ZCode) thì tool dừng lại, không đoán token.
 //   3. GET https://zcode.z.ai/api/v1/marketing/touch?seq=...
 //      Header: X-Device-Mid, X-Client-Language, X-ZCode-App-Version,
-//      Authorization: Bearer <jwt> neu co token.
-//   4. Neu co delivery moi (banner/popup) thi hien thong bao ra man hinh.
-//      Ban tu mo ZCode va bam nut nhan trong app.
+//      Authorization: Bearer <jwt> nếu có token.
+//   4. Nếu có delivery mới (banner/popup) thì hiện thông báo ra màn hình.
+//      Bạn tự mở ZCode và bấm nút nhận trong app.
 //
-// Khong goi POST /api/v1/marketing/touch/action, khong claim plan.
-// Tan suat mac dinh 600s (dung app goc), dung dat duoi 300s.
+// Không gọi POST /api/v1/marketing/touch/action, không claim plan.
+// Tần suất mặc định 600s (đúng app gốc), dùng đặt dưới 300s.
 //
-// Cach chay (khong can cai package, khong can npm install):
-//   bun run deal-checker.ts --once
-//   bun run deal-checker.ts                 # chay nen, 10 phut check 1 lan
-//   bun run deal-checker.ts --self-test     # test parse, khong goi API
-//   bun run deal-checker.ts --dry-run       # chi in cau hinh (token chi hien "co/khong")
-//   bun run deal-checker.ts --config-dir /duong/dan/khac/.zcode/v2
-//   bun run deal-checker.ts --open          # co deal thi thu mo ZCode luon
+// Cách chạy (không cần cái package, không cần npm install):
+//   bun run src/deal-checker.ts --once
+//   bun run src/deal-checker.ts                 # chạy nên, 10 phút check 1 lần
+//   bun run src/deal-checker.ts --self-test     # test parse, không gọi API
+//   bun run src/deal-checker.ts --dry-run       # chỉ in cau hình (token chỉ hiện "có/không")
+//   bun run src/deal-checker.ts --config-dir /duong/dan/khác/.zcode/v2
+//   bun run src/deal-checker.ts --open          # có deal thì thử mở ZCode luôn
 //
-// Che do tray / chay nen (1 lenh, tat terminal duoc):
-//   bun run deal-checker.ts --tray          # tach daemon + icon tray, lenh thoat ngay
-//   bun run deal-checker.ts --status        # xem daemon co dang chay khong
-//   bun run deal-checker.ts --stop          # thoat daemon (tuong duong nut Thoat trong tray)
-//   Tren Windows, --tray con mo run.ps1: icon tray co menu
-//   "Mo ZCode", "Kiem tra ngay", "Mo log", "Thoát". Bam vao bong
-//   thong bao deal cung mo ZCode. Tren macOS/Linux chua co menu tray
-//   goc (can Swift/AppIndicator rieng), daemon van chay nen, bao bang
-//   thong bao he thong, va thoat bang --stop.
+// Chế độ tray / chạy nên (1 lệnh, tắt terminal được):
+//   bun run src/deal-checker.ts --tray          # tách daemon + icon tray, lệnh thoát ngay
+//   bun run src/deal-checker.ts --status        # xem daemon có đang chạy không
+//   bun run src/deal-checker.ts --stop          # thoát daemon (tương đương nút Thoát trong tray)
+//   Trên Windows, --tray con mở run.ps1: icon tray có menu
+//   "Mở ZCode", "Kiểm tra ngay", "Mở log", "Thoát". Bấm vào bong
+//   thông báo deal cũng mở ZCode. Trên macOS/Linux chứa có menu tray
+//   gốc (cần Swift/AppIndicator riêng), daemon vẫn chạy nên, báo bằng
+//   thông báo hệ thống, và thoát bằng --stop.
 //
-// Bien moi truong tuy chon (khong bat buoc neu da co config ZCode):
-//   ZCODE_DATA_BASE_DIR  - doi thu muc goc, thay cho $HOME
-//   ZCODE_JWT_TOKEN      - ghi de token, uu tien hon credentials.json
-//   ZCODE_CREDENTIAL_SECRET - dung khi ZCode cua ban dat secret rieng
-//   ZCODE_LOCALE         - zh-CN hoac en-US (mac dinh en-US)
-//   ZCODE_APP_VERSION    - X-ZCode-App-Version (mac dinh 3.17.2)
-//   ZCODE_MARKETING_URL  - chi dung de test voi server mau cuc bo
+// Biến môi trường tùy chọn (không bắt buộc nếu đã có config ZCode):
+//   ZCODE_DATA_BASE_DIR  - đổi thư mục gốc, thay cho $HOME
+//   ZCODE_JWT_TOKEN      - ghi đè token, ưu tiên hon credentials.json
+//   ZCODE_CREDENTIAL_SECRET - dùng khi ZCode của bạn đặt secret riêng
+//   ZCODE_LOCALE         - zh-CN hoặc en-US (mặc định en-US)
+//   ZCODE_APP_VERSION    - X-ZCode-App-Version (mặc định 3.17.2)
+//   ZCODE_MARKETING_URL  - chỉ dùng để test với server mẫu cục bộ
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -52,7 +52,7 @@ import { notify, openZcode } from "./notify.ts";
 
 const API_URL = process.env.ZCODE_MARKETING_URL || "https://zcode.z.ai/api/v1/marketing/touch";
 const DEFAULT_INTERVAL_MS = 600_000;
-// State cua watcher chi nam o ~/.zcode/mod, khong doc thu muc cu nao:
+// State của watcher chỉ nằm ở ~/.zcode/mod, không đọc thư mục cũ nào:
 //   ~/.zcode/mod/{deal-checker.pid, deal-checker.log,
 //     deal-notify.json, check-now.trigger, seen_deals.json}
 const STATE_DIR = join(homedir(), ".zcode", "mod");
@@ -67,7 +67,7 @@ function ensureStateDir(): void {
   try {
     mkdirSync(STATE_DIR, { recursive: true });
   } catch {
-    // Bo qua, cac ham ghi file se bao loi rieng neu can.
+    // Bỏ qua, các hàm ghi file sẽ báo lỗi riêng nếu cần.
   }
 }
 
@@ -97,7 +97,7 @@ function removePidFilesIfMine(pid: number): void {
   try {
     if (readPidFrom(PID_FILE) === pid) unlinkSync(PID_FILE);
   } catch {
-    // Bo qua.
+    // Bỏ qua.
   }
 }
 
@@ -106,11 +106,11 @@ function appendLog(line: string): void {
   const stamped = `[${new Date().toISOString()}] ${line}\n`;
   try {
     const existing = existsSync(LOG_FILE) ? readFileSync(LOG_FILE, "utf-8") : "";
-    // Giu log gon: chi giu khoang 200 dong cuoi.
+    // Giữ log gọn: chỉ giữ khoảng 200 dòng cuối.
     const kept = (existing + stamped).split("\n").slice(-201).join("\n");
     writeFileSync(LOG_FILE, kept, "utf-8");
   } catch {
-    // Log hong thi khong duoc lam hong vong poll.
+    // Log hỏng thì không được làm hỏng vong poll.
   }
 }
 
@@ -130,24 +130,33 @@ function scriptPath(): string {
   return main;
 }
 
-// Ban chay bang `bun run`: process.execPath la binary bun.
-// Ban compile (`bun build --compile`): process.execPath la chinh file exe.
+// Bạn chạy bằng `bun run`: process.execPath là binary bun.
+// Bản compile (`bun build --compile`): process.execPath là chính file exe.
 function isBunRunner(): boolean {
   const exe = process.execPath || "";
   const base = exe.split(/[\\/]/).pop() || "";
   return base === "bun" || base === "bun.exe" || base.startsWith("bun-");
 }
 
-// Thu muc chua run.ps1: ban bun thi cung thu muc voi deal-checker.ts,
-// ban compile thi cung thu muc voi file exe (user copy run.ps1 kem exe).
+// Thư mục chứa run.ps1: bản compile thì cùng thư mục với file exe
+// (user copy run.ps1 kèm exe); bản bun thì run.ps1 nằm ở gốc repo,
+// tức thư mục cha của src/ (nơi chứa deal-checker.ts).
 function appDir(): string {
   if (!isBunRunner()) return dirname(process.execPath);
   const script = scriptPath();
   return script ? dirname(script) : dirname(process.execPath);
 }
 
+function findTrayScript(): string | null {
+  const candidates = [join(appDir(), "run.ps1"), join(appDir(), "..", "run.ps1")];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function forwardTrayArgs(original: string[]): string[] {
-  // Chi chuyen cac tuy chon an toan sang daemon con; --tray tu no khong chuyen.
+  // Chỉ chuyển các tùy chọn an toàn sang daemon con; --tray tự nó không chuyển.
   const keep = new Set(["interval", "config-dir"]);
   const out: string[] = [];
   for (let i = 0; i < original.length; i++) {
@@ -171,27 +180,32 @@ function forwardTrayArgs(original: string[]): string[] {
 
 function printTrayHelp(): void {
   if (!isBunRunner()) {
-    console.log("[tray] Xem trang thai: zcode-deal status | Thoat: zcode-deal stop");
+    console.log("[tray] Xem trạng thái: zcode-deal status | Thoát: zcode-deal stop");
   } else if (scriptPath().endsWith("cli.ts")) {
-    console.log("[tray] Xem trang thai: bun run cli.ts status | Thoat: bun run cli.ts stop");
+    console.log("[tray] Xem trạng thái: bun run src/cli.ts status | Thoát: bun run src/cli.ts stop");
   } else {
-    console.log("[tray] Xem trang thai: bun run deal-checker.ts --status | Thoat: bun run deal-checker.ts --stop");
+    console.log("[tray] Xem trạng thái: bun run src/deal-checker.ts --status | Thoát: bun run src/deal-checker.ts --stop");
   }
 }
 
-// Mo icon tray Windows neu chua co. PID cua powershell duoc ghi
-// vao tray.pid ngay khi spawn, run.ps1 tu xoa file khi thoat;
-// PID chet thi lan chay sau spawn lai, khong tao 2 icon.
+// Mở icon tray Windows nếu chứa có. PID của powershell được ghi
+// vào tray.pid ngay khi spawn, run.ps1 tự xoá file khi thoát;
+// PID chet thì lần chạy sau spawn lại, không tạo 2 icon.
 function spawnTrayUI(): void {
   if (process.platform !== "win32") return;
   const existingTray = readPidFrom(TRAY_PID_FILE);
   if (existingTray && pidAlive(existingTray)) {
-    console.log(`[tray] Icon tray da chay roi (PID ${existingTray}).`);
+    console.log(`[tray] Icon tray đã chạy rồi (PID ${existingTray}).`);
+    appendLog(`[tray] Icon tray đã chạy rồi (PID ${existingTray}).`);
     return;
   }
-  const trayScript = join(appDir(), "run.ps1");
-  if (!existsSync(trayScript)) {
-    console.log(`[tray] Khong tim thay run.ps1 o ${trayScript}, daemon van chay nen nhung khong co icon tray.`);
+  const trayScript = findTrayScript();
+  if (!trayScript) {
+    // Lỗi này trước đây chỉ in ra console rồi cửa sổ tắt mất nên
+    // user không thấy: ghi thêm vào log để status đọc được.
+    const message = `[tray] Không tìm thấy run.ps1 ở ${appDir()} (hoặc thư mục cha), daemon vẫn chạy nền nhưng không có icon tray. Tải run.ps1 từ Release về cùng thư mục với exe rồi chạy lại lệnh tray.`;
+    console.log(message);
+    appendLog(message);
     return;
   }
   try {
@@ -223,12 +237,14 @@ function spawnTrayUI(): void {
       try {
         writeFileSync(TRAY_PID_FILE, String(tray.pid), "utf-8");
       } catch {
-        // Bo qua, lan sau se spawn lai neu khong thay PID song.
+        // Bỏ qua, lần sau sẽ spawn lại nếu không thấy PID sống.
       }
     }
-    console.log("[tray] Icon tray Windows da mo (menu: Mo ZCode / Kiem tra ngay / Mo log / Thoát).");
+    console.log("[tray] Icon tray Windows đã mở (menu: Mở ZCode / Kiểm tra ngay / Mở log / Thoát).");
+    appendLog(`[tray] Icon tray Windows đã mở (script: ${trayScript}, powershell PID: ${tray.pid ?? "?"}).`);
   } catch (error) {
-    console.error(`[tray] Khong mo duoc icon tray: ${error}`);
+    console.error(`[tray] Không mở được icon tray: ${error}`);
+    appendLog(`[tray] Không mở được icon tray: ${error}`);
   }
 }
 
@@ -236,7 +252,7 @@ async function spawnTray(cliArgs: string[]): Promise<number> {
   ensureStateDir();
   const existing = readPidFile();
   if (existing && pidAlive(existing)) {
-    console.log(`[tray] Daemon da chay roi (PID ${existing}).`);
+    console.log(`[tray] Daemon đã chạy rồi (PID ${existing}).`);
     spawnTrayUI();
     printTrayHelp();
     return 0;
@@ -246,37 +262,37 @@ async function spawnTray(cliArgs: string[]): Promise<number> {
   if (isBunRunner()) {
     const script = scriptPath();
     if (!script) {
-      console.error("[tray] LOI: khong xac dinh duoc duong dan script de tach daemon.");
+      console.error("[tray] LỖI: không xác định được đường dẫn script để tách daemon.");
       return 2;
     }
     childArgs = ["run", script, "--tray-child", ...forwarded];
   } else {
-    // Ban compile: exe tu chay lenh an __tray-child (cli.ts dich thanh --tray-child).
+    // Bản compile: exe tự chạy lệnh ẩn __tray-child (cli.ts dịch thành --tray-child).
     childArgs = ["__tray-child", ...forwarded];
   }
   const child = spawn(process.execPath, childArgs, { detached: true, stdio: "ignore", env: process.env });
   child.unref();
-  // Cho daemon con ghi PID file roi moi ket luan.
+  // Cho daemon con ghi PID file rồi mới kết luận.
   for (let i = 0; i < 20; i++) {
     await Bun.sleep(100);
     const pid = readPidFile();
     if (pid && pidAlive(pid)) {
-      console.log(`[tray] Daemon da chay (PID ${pid}). Ban co the tat cua so terminal nay.`);
+      console.log(`[tray] Daemon đã chạy (PID ${pid}). Bạn có thể tắt của số terminal này.`);
       console.log(`[tray] Log: ${LOG_FILE}`);
       if (process.platform === "win32") {
         spawnTrayUI();
       } else {
-        console.log("[tray] He nay chua co menu tray goc: daemon chay nen + thong bao he thong, thoat bang --stop.");
+        console.log("[tray] He này chứa có menu tray gốc: daemon chạy nên + thông báo hệ thống, thoát bằng --stop.");
       }
       printTrayHelp();
       return 0;
     }
   }
-  console.error("[tray] LOI: daemon khong ghi PID file. Xem log (neu co):");
+  console.error("[tray] LỖI: daemon không ghi PID file. Xem log (nếu có):");
   try {
     console.error(readFileSync(LOG_FILE, "utf-8").split("\n").slice(-10).join("\n"));
   } catch {
-    console.error("(chua co log file)");
+    console.error("(chứa có log file)");
   }
   return 1;
 }
@@ -284,22 +300,22 @@ async function spawnTray(cliArgs: string[]): Promise<number> {
 async function handleStop(): Promise<number> {
   const pid = readPidFile();
   if (!pid) {
-    console.log("[tray] Khong co daemon nao dang chay (khong thay PID file).");
+    console.log("[tray] Không có daemon nào đang chạy (không thấy PID file).");
     return 0;
   }
   if (!pidAlive(pid)) {
-    console.log(`[tray] PID ${pid} da chet roi, don PID file cu.`);
+    console.log(`[tray] PID ${pid} đã chet rồi, don PID file cũ.`);
     try {
       unlinkSync(PID_FILE);
     } catch {
-      // Bo qua.
+      // Bỏ qua.
     }
     return 0;
   }
   try {
     process.kill(pid, "SIGTERM");
   } catch (error) {
-    console.error(`[tray] Khong gui duoc SIGTERM toi PID ${pid}: ${error}`);
+    console.error(`[tray] Không gui được SIGTERM tới PID ${pid}: ${error}`);
     return 1;
   }
   for (let i = 0; i < 30; i++) {
@@ -310,15 +326,15 @@ async function handleStop(): Promise<number> {
     try {
       process.kill(pid, "SIGKILL");
     } catch {
-      // Bo qua.
+      // Bỏ qua.
     }
   }
   try {
     unlinkSync(PID_FILE);
   } catch {
-    // Daemon con cung tu xoa PID file khi thoat.
+    // Daemon con cùng tự xoá PID file khi thoát.
   }
-  console.log(`[tray] Da thoat daemon (PID ${pid}). Tren Windows, icon tray se tu bien mat khi thay PID file mat.`);
+  console.log(`[tray] Đã thoát daemon (PID ${pid}). Trên Windows, icon tray sẽ tự biến mất khi thấy PID file mất.`);
   return 0;
 }
 
@@ -327,9 +343,17 @@ function handleStatus(): number {
   if (pid && pidAlive(pid)) {
     console.log(`[tray] Daemon DANG CHAY (PID ${pid}).`);
   } else if (pid) {
-    console.log(`[tray] PID file con ${pid} nhung tien trinh da chet (stale).`);
+    console.log(`[tray] PID file còn ${pid} nhưng tiến trình đã chết (stale).`);
   } else {
-    console.log("[tray] Daemon KHONG chay.");
+    console.log("[tray] Daemon KHÔNG chạy.");
+  }
+  const trayPid = readPidFrom(TRAY_PID_FILE);
+  if (trayPid && pidAlive(trayPid)) {
+    console.log(`[tray] Icon tray Windows ĐANG CHẠY (powershell PID ${trayPid}).`);
+  } else if (trayPid) {
+    console.log(`[tray] tray.pid còn ${trayPid} nhưng tiến trình đã chết (stale) - icon tray không còn, chạy lại lệnh tray để mở lại.`);
+  } else {
+    console.log("[tray] Icon tray Windows KHÔNG chạy (không có tray.pid). Trên Windows, kiểm tra run.ps1 có nằm cùng thư mục với exe không, và icon có bị giấu trong vùng overflow (^) không.");
   }
   let logText: string | null = null;
   try {
@@ -338,26 +362,26 @@ function handleStatus(): number {
     logText = null;
   }
   if (logText !== null) {
-    console.log("[tray] 10 dong log cuoi:");
+    console.log("[tray] 10 dòng log cuối:");
     for (const line of logText.trim().split("\n").slice(-10)) console.log(`  ${line}`);
   } else {
-    console.log("[tray] Chua co log file.");
+    console.log("[tray] Chưa có log file.");
   }
   const seen = loadSeen();
-  console.log(`[tray] Da thay ${seen.size} deal (seen file).`);
+  console.log(`[tray] Đã thấy ${seen.size} deal (seen file).`);
   return 0;
 }
 
 function resolveAuthForTray(configDir: string): { deviceMid: string; token: string | null } {
   const deviceMid = readDeviceMid(configDir);
-  if (!deviceMid) throw new Error("khong tim thay deviceMid trong telemetry-state.json");
+  if (!deviceMid) throw new Error("không tìm thấy deviceMid trong telemetry-state.json");
   let token: string | null = process.env.ZCODE_JWT_TOKEN?.trim() || null;
-  if (!token) token = readZcodeJwt(configDir); // Nem loi neu giai ma that bai.
+  if (!token) token = readZcodeJwt(configDir); // Nem lỗi nếu giải mã thật bai.
   return { deviceMid, token };
 }
 
 async function sleepWithTriggerCheck(ms: number): Promise<boolean> {
-  // Tra ve true neu co file trigger (can check ngay), false neu het gio ngu.
+  // Tra ve true nếu có file trigger (cần check ngay), false nếu het giờ ngu.
   const step = 2000;
   let remaining = ms;
   while (remaining > 0) {
@@ -365,7 +389,7 @@ async function sleepWithTriggerCheck(ms: number): Promise<boolean> {
       try {
         unlinkSync(TRIGGER_FILE);
       } catch {
-        // Bo qua.
+        // Bỏ qua.
       }
       return true;
     }
@@ -392,27 +416,27 @@ async function runTrayChild(args: Record<string, string | boolean>): Promise<num
     removePidFilesIfMine(process.pid);
   };
   process.on("SIGTERM", () => {
-    log("[tray-child] Nhan SIGTERM, thoat.");
+    log("[tray-child] Nhận SIGTERM, thoát.");
     cleanup();
     process.exit(0);
   });
   process.on("SIGINT", () => {
-    log("[tray-child] Nhan SIGINT, thoat.");
+    log("[tray-child] Nhận SIGINT, thoát.");
     cleanup();
     process.exit(0);
   });
   writeFileSync(PID_FILE, String(process.pid), "utf-8");
-  log(`[tray-child] Daemon bat dau (PID ${process.pid}), interval ${intervalMs / 1000}s.`);
+  log(`[tray-child] Daemon bat đầu (PID ${process.pid}), interval ${intervalMs / 1000}s.`);
   let deviceMid: string;
   let token: string | null;
   try {
     ({ deviceMid, token } = resolveAuthForTray(configDir));
   } catch (error) {
-    log(`[tray-child] LOI auth: ${error}`);
+    log(`[tray-child] LỖI auth: ${error}`);
     cleanup();
     return 2;
   }
-  if (!token) log("[tray-child] Luu y: khong co token, dang check an danh.");
+  if (!token) log("[tray-child] Lưu ý: không có token, đang check ẩn danh.");
   let seq = 0;
   let failures = 0;
   const seen = loadSeen();
@@ -422,32 +446,32 @@ async function runTrayChild(args: Record<string, string | boolean>): Promise<num
       seq++;
       failures = 0;
       const fresh = deals.filter((d) => !seen.has(d.key));
-      log(`[tray-child] Co ${deals.length} delivery, ${fresh.length} moi: ${deals.map((d) => d.key).join(", ") || "(rong)"}`);
+      log(`[tray-child] Có ${deals.length} delivery, ${fresh.length} mới: ${deals.map((d) => d.key).join(", ") || "(rỗng)"}`);
       if (fresh.length > 0) {
         for (const deal of fresh) seen.add(deal.key);
         saveSeen(seen);
-        const lines = ["ZCode co deal moi! Mo app va bam nut nhan trong app.", ""];
+        const lines = ["ZCode có deal mới! Mở app và bấm nút nhận trong app.", ""];
         for (const deal of fresh) {
           lines.push(`- [${deal.position}] ${deal.campaignId} (priority ${String(deal.priority)})`);
           if (deal.title) lines.push(`  ${deal.title}`);
           if (deal.detail) lines.push(`  ${deal.detail}`);
         }
-        lines.push("", "Tool nay chi bao, khong tu nhan thay ban.");
+        lines.push("", "Tool này chỉ báo, không tự nhận thay bạn.");
         const message = lines.join("\n");
-        writeNotifyFile("ZCode - Co deal moi!", message, fresh.map((d) => d.key).join(","));
+        writeNotifyFile("ZCode - Có deal mới!", message, fresh.map((d) => d.key).join(","));
         if (isWindowsTray) {
-          // Tray Windows se doc notify file va hien BalloonTip + click mo ZCode.
-          // Khong goi MessageBox o day vi no la modal chan man hinh.
-          log("[tray-child] Da ghi notify file cho tray Windows.");
+          // Tray Windows sẽ đọc notify file và hiện BalloonTip + click mở ZCode.
+          // Không gọi MessageBox ở đây vì nó là modal chặn màn hình.
+          log("[tray-child] Đã ghi notify file cho tray Windows.");
         } else {
-          notify("ZCode - Co deal moi!", message);
+          notify("ZCode - Có deal mới!", message);
         }
         if (autoOpen) log(openZcode());
       }
     } catch (error) {
       failures++;
       const delay = Math.min(600_000, 30_000 * 2 ** Math.min(failures - 1, 5));
-      log(`[tray-child] Check loi (${error}). Doi ${Math.round(delay / 1000)}s.`);
+      log(`[tray-child] Check lỗi (${error}). Đợi ${Math.round(delay / 1000)}s.`);
       await Bun.sleep(delay);
       continue;
     }
@@ -487,7 +511,7 @@ export function parseSnapshot(payload: unknown): Deal[] {
     const position = delivery.resource_position;
     if (typeof campaignId !== "string" || !campaignId.trim()) continue;
     if (position !== "banner" && position !== "popup") continue;
-    if (seenPositions.has(position)) continue; // Moi vi tri chi lay 1 cai dau tien, giong app goc.
+    if (seenPositions.has(position)) continue; // Mỗi vị trí chỉ lấy 1 cái đầu tiên, giống app gốc.
     seenPositions.add(position);
     let title = "";
     let detail = "";
@@ -496,7 +520,7 @@ export function parseSnapshot(payload: unknown): Deal[] {
       const buttons = Array.isArray(banner.buttons) ? banner.buttons : [];
       const labels = buttons.map((b) => textContent((b as Record<string, unknown>).text)).filter(Boolean);
       title = textContent(((banner.success_popup ?? {}) as Record<string, unknown>).title);
-      detail = labels.join(" / ") || "(banner, khong co nut doc duoc)";
+      detail = labels.join(" / ") || "(banner, không có nút đọc được)";
     } else {
       const popup = (delivery.popup ?? {}) as Record<string, unknown>;
       title = textContent(popup.title);
@@ -528,8 +552,8 @@ const SAMPLE_SNAPSHOT = {
         priority: 80,
         resource_position: "banner",
         banner: {
-          buttons: [{ text: { format: "plaintext", content: "Nhan ngay" } }],
-          success_popup: { title: { format: "plaintext", content: "Nhan thanh cong" } },
+          buttons: [{ text: { format: "plaintext", content: "Nhận ngay" } }],
+          success_popup: { title: { format: "plaintext", content: "Nhận thanh công" } },
         },
       },
       {
@@ -537,9 +561,9 @@ const SAMPLE_SNAPSHOT = {
         priority: 90,
         resource_position: "popup",
         popup: {
-          title: { format: "plaintext", content: "Deal dem" },
+          title: { format: "plaintext", content: "Deal đêm" },
           description: { format: "plaintext", content: "300M token GLM-5.3-Flash" },
-          buttons: [{ text: { format: "plaintext", content: "Nhan" } }],
+          buttons: [{ text: { format: "plaintext", content: "Nhận" } }],
         },
       },
       { campaign_id: "sample-banner-duplicate", priority: 10, resource_position: "banner", banner: { buttons: [] } },
@@ -564,7 +588,7 @@ function saveSeen(seen: Set<string>): void {
     ensureStateDir();
     writeFileSync(SEEN_FILE, JSON.stringify([...seen].sort(), null, 2), "utf-8");
   } catch (error) {
-    console.error(`[checker] khong ghi duoc seen file: ${error}`);
+    console.error(`[checker] không ghi được seen file: ${error}`);
   }
 }
 
@@ -580,7 +604,7 @@ async function queryDeals(token: string | null, deviceMid: string, locale: strin
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(url, { headers, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status} tu marketing/touch`);
+    if (!response.ok) throw new Error(`HTTP ${response.status} từ marketing/touch`);
     return parseSnapshot(await response.json());
   } finally {
     clearTimeout(timeout);
@@ -604,9 +628,9 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return args;
 }
 
-// Ham chinh, dung duoc ca khi chay truc tiep (bun run deal-checker.ts)
-// va khi duoc cli.ts goi. argv mac dinh la process.argv.slice(2)
-// (dung cho ca ban bun va ban compile, vi argv[1] luon la script/exe).
+// Hàm chính, dùng được cả khi chạy trực tiếp (bun run src/deal-checker.ts)
+// và khi được cli.ts gọi. argv mặc định là process.argv.slice(2)
+// (dùng cho cả bản bun và bản compile, vì argv[1] luôn là script/exe).
 export async function runDealChecker(argv: string[] = process.argv.slice(2)): Promise<number> {
   const args = parseArgs(argv);
   const configDir = getZcodeConfigDir(typeof args["config-dir"] === "string" ? args["config-dir"] : undefined);
@@ -617,7 +641,7 @@ export async function runDealChecker(argv: string[] = process.argv.slice(2)): Pr
 
   if (args["self-test"]) {
     const deals = parseSnapshot(SAMPLE_SNAPSHOT);
-    console.log(`[checker] self-test OK: ${deals.length} delivery (banner 1 + popup 1, ban trung vi tri da bi loai):`);
+    console.log(`[checker] self-test OK: ${deals.length} delivery (banner 1 + popup 1, bản trùng vị trí đã bị loại):`);
     for (const deal of deals) console.log(`  - ${deal.key} | ${deal.title} | ${deal.detail}`);
     return 0;
   }
@@ -625,12 +649,12 @@ export async function runDealChecker(argv: string[] = process.argv.slice(2)): Pr
   const summary = describeConfig(configDir);
   if (args["dry-run"]) {
     console.log(`[checker] config dir: ${summary.configDir}`);
-    console.log(`[checker] files trong v2: ${summary.files.join(", ") || "(khong thay file nao)"}`);
-    console.log(`[checker] deviceMid: ${summary.deviceMid ? summary.deviceMid.slice(0, 8) + "..." : "(khong co)"}`);
-    console.log(`[checker] credential keys: ${summary.credentialKeys.join(", ") || "(khong co)"}`);
-    console.log(`[checker] co zcodejwttoken: ${summary.hasJwt ? "co" : "khong"}`);
+    console.log(`[checker] files trong v2: ${summary.files.join(", ") || "(không thấy file nào)"}`);
+    console.log(`[checker] deviceMid: ${summary.deviceMid ? summary.deviceMid.slice(0, 8) + "..." : "(không có)"}`);
+    console.log(`[checker] credential keys: ${summary.credentialKeys.join(", ") || "(không có)"}`);
+    console.log(`[checker] có zcodejwttoken: ${summary.hasJwt ? "có" : "không"}`);
     console.log(`[checker] API: ${API_URL}, locale: ${locale}, app-version: ${appVersion}, interval: ${intervalMs / 1000}s`);
-    console.log("[checker] Che do: chi GET marketing/touch, khong POST action, khong claim, khong in token.");
+    console.log("[checker] Chế độ: chỉ GET marketing/touch, không POST action, không claim, không in token.");
     return 0;
   }
 
@@ -640,31 +664,31 @@ export async function runDealChecker(argv: string[] = process.argv.slice(2)): Pr
   if (args.status) return handleStatus();
 
   if (intervalMs < 300_000) {
-    console.error("[checker] Canh bao: interval duoi 300s de bi 429. Tool van chay theo so ban dat.");
+    console.error("[checker] Canh báo: interval dưới 300s dễ bị 429. Tool vẫn chạy theo số bạn đặt.");
   }
 
   const deviceMid = readDeviceMid(configDir);
   if (!deviceMid) {
-    console.error("[checker] LOI: khong tim thay deviceMid trong telemetry-state.json.");
-    console.error("[checker] Mo ZCode 1 lan de no tao file, hoac kiem tra lai ZCODE_DATA_BASE_DIR.");
+    console.error("[checker] LỖI: không tìm thấy deviceMid trong telemetry-state.json.");
+    console.error("[checker] Mở ZCode 1 lần để nó tạo file, hoặc kiểm tra lại ZCODE_DATA_BASE_DIR.");
     return 2;
   }
 
-  // Thu tu token: env ghi de > credentials.json giai ma. Khong bao gio in token.
+  // Thứ tự token: env ghi đè > credentials.json giải mã. Không báo giờ in token.
   let token: string | null = process.env.ZCODE_JWT_TOKEN?.trim() || null;
   if (!token) {
     try {
       token = readZcodeJwt(configDir);
     } catch (error) {
-      console.error(`[checker] LOI: khong giai ma duoc zcodejwttoken (${error}).`);
-      console.error("[checker] Thuong do chay khac user/may voi ZCode, hoac ZCODE_CREDENTIAL_SECRET khac voi luc ZCode ma hoa.");
+      console.error(`[checker] LỖI: không giải mã được zcodejwttoken (${error}).`);
+      console.error("[checker] Thường do chạy khác user/máy với ZCode, hoặc ZCODE_CREDENTIAL_SECRET khác với lúc ZCode mã hoá.");
       return 2;
     }
   }
   if (!token) {
-    console.error("[checker] Luu y: khong co token, dang check an danh. Deal gan tai khoan co the khong hien.");
+    console.error("[checker] Lưu ý: không có token, đang check ẩn danh. Deal gắn tài khoản có thể không hiện.");
   } else {
-    console.log("[checker] Da co token tu config (khong hien token ra day).");
+    console.log("[checker] Đã có token từ config (không hiện token ra đây).");
   }
 
   let seq = 0;
@@ -678,24 +702,24 @@ export async function runDealChecker(argv: string[] = process.argv.slice(2)): Pr
       seq++;
       failures = 0;
       const fresh = deals.filter((d) => !seen.has(d.key));
-      console.log(`[checker] Co ${deals.length} delivery, ${fresh.length} moi: ${deals.map((d) => d.key).join(", ") || "(rong)"}`);
+      console.log(`[checker] Có ${deals.length} delivery, ${fresh.length} mới: ${deals.map((d) => d.key).join(", ") || "(rỗng)"}`);
       if (fresh.length > 0) {
         for (const deal of fresh) seen.add(deal.key);
         saveSeen(seen);
-        const lines = ["ZCode co deal moi! Mo app va bam nut nhan trong app.", ""];
+        const lines = ["ZCode có deal mới! Mở app và bấm nút nhận trong app.", ""];
         for (const deal of fresh) {
           lines.push(`- [${deal.position}] ${deal.campaignId} (priority ${String(deal.priority)})`);
           if (deal.title) lines.push(`  ${deal.title}`);
           if (deal.detail) lines.push(`  ${deal.detail}`);
         }
-        lines.push("", "Tool nay chi bao, khong tu nhan thay ban.");
-        notify("ZCode - Co deal moi!", lines.join("\n"));
+        lines.push("", "Tool này chỉ báo, không tự nhận thay bạn.");
+        notify("ZCode - Có deal mới!", lines.join("\n"));
         if (autoOpen) console.log(openZcode());
       }
     } catch (error) {
       failures++;
       const delay = Math.min(600_000, 30_000 * 2 ** Math.min(failures - 1, 5));
-      console.error(`[checker] Check loi (${error}). Doi ${Math.round(delay / 1000)}s roi thu lai.`);
+      console.error(`[checker] Check lỗi (${error}). Đợi ${Math.round(delay / 1000)}s rồi thử lại.`);
       if (once) return 1;
       await Bun.sleep(delay);
       continue;
@@ -705,8 +729,8 @@ export async function runDealChecker(argv: string[] = process.argv.slice(2)): Pr
   }
 }
 
-// Chi tu chay khi file nay la entrypoint. Khi cli.ts import thi
-// cli se goi runDealChecker() theo lenh cua user.
+// Chỉ tự chạy khi file này là entrypoint. Khi cli.ts import thì
+// cli sẽ gọi runDealChecker() theo lệnh của user.
 if (import.meta.main) {
   process.exitCode = await runDealChecker();
 }

@@ -41,11 +41,11 @@ Cần có [Bun](https://bun.sh).
 | `run.ps1` | Icon system tray trên Windows cho daemon chạy nền (xem bên dưới). Không dùng trên hệ điều hành khác. |
 
 ```sh
-bun run deal-checker.ts --once
-bun run deal-checker.ts            # poll chạy nền, 10 phút kiểm tra một lần
-bun run deal-checker.ts --self-test
-bun run deal-checker.ts --dry-run  # chỉ in cấu hình, không gọi API
-bun run popup-watcher.ts --test
+bun run src/deal-checker.ts --once
+bun run src/deal-checker.ts            # poll chạy nền, 10 phút kiểm tra một lần
+bun run src/deal-checker.ts --self-test
+bun run src/deal-checker.ts --dry-run  # chỉ in cấu hình, không gọi API
+bun run src/popup-watcher.ts --test
 ```
 
 ## CLI và file .exe (Bun compile)
@@ -57,13 +57,13 @@ bản script, và state vẫn ở `~/.zcode/mod/`.
 
 ```sh
 # Chạy CLI bằng Bun (không cần build)
-bun run cli.ts check --once
-bun run cli.ts tray --open
-bun run cli.ts status
-bun run cli.ts stop
-bun run cli.ts reminder --test
-bun run cli.ts self-test
-bun run cli.ts --help
+bun run src/cli.ts check --once
+bun run src/cli.ts tray --open
+bun run src/cli.ts status
+bun run src/cli.ts stop
+bun run src/cli.ts reminder --test
+bun run src/cli.ts self-test
+bun run src/cli.ts --help
 
 # Build file chạy độc lập
 bun run build:exe        # Windows x64 -> dist/zcode-deal.exe
@@ -86,6 +86,20 @@ lên, không tạo daemon trùng (PID của icon được theo dõi ở
 `~/.zcode/mod/tray.pid`, `run.ps1` tự xoá file này khi thoát).
 Muốn xem trợ giúp thì chạy `zcode-deal help` thay vì chạy trần.
 
+Không thấy icon trong tray thì kiểm tra theo thứ tự này (daemon chạy
+không đồng nghĩa icon đã mở, vì icon do `run.ps1` mở riêng):
+1. `run.ps1` có nằm cùng thư mục với `zcode-deal.exe` không? Tải từ
+   Release thì phải tải cả hai file, chỉ tải exe thì daemon chạy nền
+   nhưng không có icon. Lỗi này được ghi vào
+   `~/.zcode/mod/deal-checker.log` với dòng bắt đầu bằng `[tray]`.
+2. Icon có bị Windows giấu trong vùng overflow (mũi tên `^` ở góc phải
+   thanh tác vụ) không? Bấm `^` để xem, kéo icon ra ngoài nếu muốn
+   hiện luôn.
+3. Chạy `zcode-deal status` và xem dòng `Icon tray Windows`: nếu báo
+   `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
+   `KHÔNG chạy (không có tray.pid)` thì là trường hợp 1 hoặc
+   PowerShell bị chặn, xem log để biết script nào đã được tìm.
+
 CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
 request (job `build-exe`): vào tab Actions của repo, mở run tương
 ứng và tải artifact `zcode-deal-windows-x64` hoặc
@@ -94,10 +108,10 @@ request (job `build-exe`): vào tab Actions của repo, mở run tương
 ## Chế độ tray / chạy nền (một lệnh, tắt được terminal)
 
 ```sh
-bun run deal-checker.ts --tray      # khởi động daemon tách rời + icon tray, lệnh thoát ngay
-bun run deal-checker.ts --tray --open   # như trên, nhưng tự mở ZCode khi có deal
-bun run deal-checker.ts --status    # daemon có đang chạy không? xem vài dòng log cuối
-bun run deal-checker.ts --stop      # dừng daemon (tương đương nút Thoát trong menu tray)
+bun run src/deal-checker.ts --tray      # khởi động daemon tách rời + icon tray, lệnh thoát ngay
+bun run src/deal-checker.ts --tray --open   # như trên, nhưng tự mở ZCode khi có deal
+bun run src/deal-checker.ts --status    # daemon có đang chạy không? xem vài dòng log cuối
+bun run src/deal-checker.ts --stop      # dừng daemon (tương đương nút Thoát trong menu tray)
 ```
 
 Cách hoạt động: `--tray` tạo một tiến trình con Bun tách rời
@@ -167,13 +181,13 @@ Token truyền qua `ZCODE_JWT_TOKEN` sẽ ghi đè lên `credentials.json`.
 Mỗi lần push lên `main` hoặc mở pull request, GitHub Actions chạy
 workflow `.github/workflows/ci.yml` trên Ubuntu với Bun 1.4.4:
 
-- `bun run build` — build `cli.ts`, `deal-checker.ts` và
+- `bun run build` — build `src/cli.ts`, `src/deal-checker.ts` và
   `popup-watcher.ts` ra `dist/` bằng Bun, để bắt lỗi cú pháp/import hỏng.
 - `bun run test` — self-test của deal-checker (chỉ parse snapshot
   mẫu, không gọi API thật, không cần token).
 - `bun run test:watcher` — popup-watcher ở chế độ `--test`
   (báo ngay, không chờ khung giờ).
-- `bun run cli.ts self-test` — kiểm tra CLI dispatch đúng lệnh.
+- `bun run src/cli.ts self-test` — kiểm tra CLI dispatch đúng lệnh.
 - Parse cú pháp `run.ps1` bằng PowerShell (chỉ parse, không chạy
   code WinForms nên an toàn trên Linux).
 - Job `build-exe` — build `zcode-deal.exe` (Windows x64, cross-compile

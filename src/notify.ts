@@ -1,10 +1,10 @@
-// notify.ts -- Hien thong bao ra man hinh, chay bang Bun, khong can dep.
-// Thu tu uu tien theo he dieu hanh, cai nao khong co thi roi xuong console:
+// notify.ts -- Hiện thông báo ra màn hình, chạy bằng Bun, không cần dep.
+// Thứ tự ưu tiên theo hệ điều hành, cái nào không có thì rồi xuống console:
 //   macOS   -> osascript "display notification"
-//   Linux   -> notify-send (neu co cai)
-//   Windows -> PowerShell MessageBox (System.Windows.Forms, co san theo .NET)
-//   Fallback -> in ra console + bip (khong im lang mat thong bao).
-// Ham nay chi BAO, khong mo app, khong click gi trong ZCode.
+//   Linux   -> notify-send (nếu có cái)
+//   Windows -> PowerShell MessageBox (System.Windows.Forms, có san theo .NET)
+//   Fallback -> in ra console + bip (không im lặng mất thông báo).
+// Hàm này chỉ BÁO, không mở app, không click gi trong ZCode.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -48,12 +48,12 @@ export function notify(title: string, message: string): void {
     if (runQuiet("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps])) return;
   }
 
-  // Fallback: khong co cong cu thong bao he thong thi van phai thay duoc.
+  // Fallback: không có công cụ thông báo hệ thống thì vẫn phải thấy được.
   console.log(`\n=== ${title} ===\n${message}\n`);
   try {
     process.stdout.write("\x07");
   } catch {
-    // Bo qua neu khong bip duoc.
+    // Bỏ qua nếu không bip được.
   }
 }
 
@@ -69,7 +69,7 @@ export function openZcode(): string {
     candidates.push("/usr/bin/zcode", "/usr/local/bin/zcode");
   }
   for (const target of candidates) {
-    // Chi goi mo khi file/app that su ton tai, khong doan mo.
+    // Chỉ gọi mở khi file/app thật sự tồn tại, không đoán mở.
     if (!existsSync(target)) continue;
     try {
       if (os === "darwin") {
@@ -79,10 +79,10 @@ export function openZcode(): string {
       } else {
         spawn(target, [], { detached: true, stdio: "ignore" }).unref();
       }
-      return `Da goi mo ZCode: ${target}`;
+      return `Đã gọi mở ZCode: ${target}`;
     } catch {
-      // Thu ung vien tiep theo.
+      // Thử ung vien tiếp theo.
     }
   }
-  return "Khong tim thay ZCode tren may nay, ban mo app thu cong nhe.";
+  return "Không tìm thấy ZCode trên máy này, bạn mở app thủ công nhé.";
 }

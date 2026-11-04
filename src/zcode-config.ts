@@ -1,30 +1,30 @@
-// zcode-config.ts -- Doc config ZCode tu ~/.zcode/v2, chay bang Bun, khong can dep.
-// Chi doc tren chinh may nay, chi dung cho tai khoan cua chinh ban.
+// zcode-config.ts -- Đọc config ZCode từ ~/.zcode/v2, chạy bằng Bun, không cần dep.
+// Chỉ đọc trên chính máy này, chỉ dùng cho tài khoản của chính bạn.
 //
-// Thu muc goc (giong ZCode, packages/services/src/paths.ts):
+// Thư mục gốc (giống ZCode, packages/services/src/paths.ts):
 //   $ZCODE_DATA_BASE_DIR  >  $HOME  >  os.homedir()
 //   + "/.zcode/v2"
-// File quan tam nhat:
-//   telemetry-state.json  -> { deviceMid }  (UUID plaintext, khong phai bi mat)
-//   credentials.json      -> { "zcodejwttoken": "enc:v1:...", ... } (gia tri da ma hoa)
+// File quan tâm nhất:
+//   telemetry-state.json  -> { deviceMid }  (UUID plaintext, không phải bi mất)
+//   credentials.json      -> { "zcodejwttoken": "enc:v1:...", ... } (giá trị đã mã hoá)
 //
-// Giai ma credentials (giong ZCode, credentialCipherProvider.ts):
+// Giai ma credentials (giống ZCode, credentialCipherProvider.ts):
 //   AES-256-GCM, key = SHA256(secret)
-//   secret = $ZCODE_CREDENTIAL_SECRET neu co,
-//            neu khong: `zcode-credential-fallback:<platform>:<homedir>:<username>`
-//   Dinh dang: "enc:v1:<iv base64url>.<authTag base64url>.<ciphertext base64url>"
-//   Gia tri khong co tien to "enc:v1:" thi tra nguyen (giong app goc).
+//   secret = $ZCODE_CREDENTIAL_SECRET nếu có,
+//            nếu không: `zcode-credential-fallback:<platform>:<homedir>:<username>`
+//   Dinh đang: "enc:v1:<iv base64url>.<authTag base64url>.<ciphertext base64url>"
+//   Gia tri không có tien to "enc:v1:" thì tra nguyen (giống app gốc).
 //
-// He qua an ninh can noi thang:
-//   - Neu khong dat ZCODE_CREDENTIAL_SECRET, khoa giai ma chi suy ra tu
-//     platform + homedir + username, nen bat cu ai chay duoc voi cung
-//     user tren cung may nay cung giai ma duoc. Day la thiet ke cua
-//     ZCode, khong phai do tool nay lam yeu di.
-//   - Neu ZCODE_CREDENTIAL_SECRET duoc dat, tool phai chay voi cung
-//     bien moi truong do moi giai ma duoc; sai secret -> fail-closed,
-//     tool bao loi chu khong doan token.
-//   - Tool khong bao gio in token, khong ghi token ra file/log, chi
-//     giu trong RAM va gui lam header Authorization toi zcode.z.ai.
+// Hệ quả an ninh cần nói thẳng:
+//   - Nếu không đặt ZCODE_CREDENTIAL_SECRET, khoa giải mã chỉ suy ra từ
+//     platform + homedir + username, nên bất cứ ai chạy được với cùng
+//     user trên cùng máy này cùng giải mã được. Đây là thiet ke của
+//     ZCode, không phải do tool này làm yếu đi.
+//   - Nếu ZCODE_CREDENTIAL_SECRET được đặt, tool phải chạy với cùng
+//     biến môi trường do mới giải mã được; sai secret -> fail-closed,
+//     tool báo lỗi chu không đoán token.
+//   - Tool không báo giờ in token, không ghi token ra file/log, chỉ
+//     giữ trong RAM và gui làm header Authorization tới zcode.z.ai.
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -40,7 +40,7 @@ export function getZcodeConfigDir(override?: string): string {
 }
 
 export function listConfigFiles(configDir: string): string[] {
-  // Chi liet ke ten file, khong doc noi dung nhay cam.
+  // Chỉ liệt kê tên file, không đọc nội dung nhạy cảm.
   const names = [
     "telemetry-state.json",
     "credentials.json",
@@ -72,7 +72,7 @@ function cipherKey(): Buffer {
   try {
     username = userInfo().username || "unknown";
   } catch {
-    // Giong app goc: khong lay duoc username thi dung "unknown".
+    // Giống app gốc: không lấy được username thì dùng "unknown".
   }
   const secret = configured || `zcode-credential-fallback:${platform()}:${homedir()}:${username}`;
   return createHash("sha256").update(secret).digest();
@@ -97,7 +97,7 @@ export function decryptCredential(value: string): string {
   return Buffer.concat([decipher.update(cipherText), decipher.final()]).toString("utf-8");
 }
 
-// Chi dung cho test/fixture cuc bo, khong dung trong tool chay that.
+// Chỉ dùng cho test/fixture cục bộ, không dùng trong tool chạy thật.
 export function encryptCredentialForTest(value: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", cipherKey(), iv);
@@ -120,8 +120,8 @@ export function readZcodeJwt(configDir: string): string | null {
 }
 
 export function mask(value: string | null): string {
-  if (!value) return "(khong co)";
-  return value.length <= 8 ? "(co, da an)" : `${value.slice(0, 8)}...`;
+  if (!value) return "(không có)";
+  return value.length <= 8 ? "(có, đã ẩn)" : `${value.slice(0, 8)}...`;
 }
 
 export interface ConfigSummary {

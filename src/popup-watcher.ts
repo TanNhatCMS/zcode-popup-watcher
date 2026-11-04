@@ -1,20 +1,20 @@
 #!/usr/bin/env bun
-// popup-watcher.ts -- Ban Bun cua tool bao theo khung gio (khong goi API).
-// Toi khung gio deal dem mo (mac dinh 17:55-22:10 gio VN) thi hien
-// thong bao he thong 1 lan trong ngay, de ban tu mo ZCode bam banner.
-// Khong doc token, khong goi API, khong tu nhan.
+// popup-watcher.ts -- Bản Bun của tool báo theo khung giờ (không gọi API).
+// Tới khung giờ deal đêm mở (mặc định 17:55-22:10 giờ VN) thì hiện
+// thông báo hệ thống 1 lần trong ngày, để bạn tự mở ZCode bấm banner.
+// Không đọc token, không gọi API, không tự nhận.
 //
-// Cach chay:
-//   bun run popup-watcher.ts            # chay nen toi khung gio
-//   bun run popup-watcher.ts --test     # bao ngay, khong doi khung gio
-//   bun run popup-watcher.ts --from 17:50 --to 22:10
+// Cách chạy:
+//   bun run src/popup-watcher.ts            # chạy nên tới khung giờ
+//   bun run src/popup-watcher.ts --test     # báo ngay, không đợi khung giờ
+//   bun run src/popup-watcher.ts --from 17:50 --to 22:10
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { notify, openZcode } from "./notify.ts";
 
-// State chi nam o ~/.zcode/mod, cung thu muc voi deal-checker.
+// State chỉ nằm ở ~/.zcode/mod, cùng thư mục với deal-checker.
 const STATE_DIR = join(homedir(), ".zcode", "mod");
 const STATE_FILE = join(STATE_DIR, "popup-watcher-state.json");
 
@@ -23,14 +23,14 @@ function vnHourMinute(): { date: string; minutes: number } {
     timeZone: "Asia/Ho_Chi_Minh",
     year: "numeric",
     month: "2-digit",
-    day: "2-digit",
+    đây: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   }).formatToParts(new Date());
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
   return {
-    date: `${get("year")}-${get("month")}-${get("day")}`,
+    date: `${get("year")}-${get("month")}-${get("đây")}`,
     minutes: Number(get("hour")) * 60 + Number(get("minute")),
   };
 }
@@ -54,7 +54,7 @@ function saveNotifiedDate(date: string): void {
     mkdirSync(STATE_DIR, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify({ notifiedDate: date }, null, 2), "utf-8");
   } catch (error) {
-    console.error(`[watcher] khong ghi duoc state: ${error}`);
+    console.error(`[watcher] không ghi được state: ${error}`);
   }
 }
 
@@ -75,7 +75,7 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return args;
 }
 
-// Ham chinh, dung duoc ca khi chay truc tiep va khi duoc cli.ts goi.
+// Hàm chính, dùng được cả khi chạy trực tiếp và khi được cli.ts gọi.
 export async function runPopupWatcher(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
   const fromMinutes = toMinutes(typeof args.from === "string" ? args.from : "17:55");
@@ -84,16 +84,16 @@ export async function runPopupWatcher(argv: string[] = process.argv.slice(2)): P
 
   const showReminder = (): void => {
     const message = [
-      "Toi gio nhan deal dem ZCode!",
+      "Tới giờ nhận deal đêm ZCode!",
       "",
-      "1. Mo ZCode.",
-      "2. Bam banner/modal deal dem trong app.",
-      "3. Tu 22:00 moi dung duoc, toi 08:00 sang hom sau reset.",
-      "4. Nho chon dung GLM-5.3-Flash + Global Building.",
+      "1. Mở ZCode.",
+      "2. Bấm banner/modal deal đêm trong app.",
+      "3. Từ 22:00 mới dùng được, tới 08:00 sáng hôm sau reset.",
+      "4. Nhớ chọn đúng GLM-5.3-Flash + Global Building.",
       "",
-      "Tool nay chi bao, khong tu bam nhan thay ban.",
+      "Tool này chỉ báo, không tự bấm nhận thay bạn.",
     ].join("\n");
-    notify("ZCode - Toi gio nhan deal dem!", message);
+    notify("ZCode - Tới giờ nhận deal đêm!", message);
     console.log(message);
     if (autoOpen) console.log(openZcode());
   };
@@ -103,7 +103,7 @@ export async function runPopupWatcher(argv: string[] = process.argv.slice(2)): P
     return;
   }
 
-  console.log(`[watcher] Dang chay nen. Se bao trong khung ${args.from || "17:55"}-${args.to || "22:10"} gio VN, 1 lan/ngay.`);
+  console.log(`[watcher] Đang chạy nên. Sẽ báo trong khung ${args.from || "17:55"}-${args.to || "22:10"} giờ VN, 1 lần/ngày.`);
   while (true) {
     const now = vnHourMinute();
     if (loadNotifiedDate() !== now.date && now.minutes >= fromMinutes && now.minutes <= toMinutesValue) {
@@ -114,8 +114,8 @@ export async function runPopupWatcher(argv: string[] = process.argv.slice(2)): P
   }
 }
 
-// Chi tu chay khi file nay la entrypoint. Khi cli.ts import thi
-// cli se goi runPopupWatcher() theo lenh cua user.
+// Chỉ tự chạy khi file này là entrypoint. Khi cli.ts import thì
+// cli sẽ gọi runPopupWatcher() theo lệnh của user.
 if (import.meta.main) {
   await runPopupWatcher();
 }

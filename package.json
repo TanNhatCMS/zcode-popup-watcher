@@ -1,1 +1,16 @@
-{"description":"Tool theo doi deal ZCode va thong bao len man hinh, chi doc, khong tu nhan deal.","name":"zcode-popup-watcher","private":true,"scripts":{"build":"bun build ./cli.ts ./deal-checker.ts ./popup-watcher.ts --outdir ./dist --target=bun","build:exe":"bun build --compile --target=bun-windows-x64 ./cli.ts --outfile ./dist/zcode-deal.exe","build:exe:linux":"bun build --compile ./cli.ts --outfile ./dist/zcode-deal","check":"bun run build && bun run test && bun run test:watcher && bun run cli.ts self-test","cli":"bun run cli.ts","test":"bun run deal-checker.ts --self-test","test:watcher":"bun run popup-watcher.ts --test"},"type":"module","version":"0.1.0"}
+{
+  "description": "Tool theo dõi deal ZCode và thông báo lên màn hình, chỉ đọc, không tự nhận deal.",
+  "name": "zcode-popup-watcher",
+  "private": true,
+  "scripts": {
+    "build": "bun build ./src/cli.ts ./src/deal-checker.ts ./src/popup-watcher.ts --outdir ./dist --target=bun",
+    "build:exe": "bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile ./dist/zcode-deal.exe",
+    "build:exe:linux": "bun build --compile ./src/cli.ts --outfile ./dist/zcode-deal",
+    "check": "bun run build && bun run test && bun run test:watcher && bun run src/cli.ts self-test",
+    "cli": "bun run src/cli.ts",
+    "test": "bun run src/deal-checker.ts --self-test",
+    "test:watcher": "bun run src/popup-watcher.ts --test"
+  },
+  "type": "module",
+  "version": "1.0.0"
+}
