@@ -99,6 +99,20 @@ không đồng nghĩa icon đã mở, vì icon do `run.ps1` mở riêng):
    `ĐANG CHẠY` mà vẫn không thấy thì là trường hợp 2; nếu báo
    `KHÔNG chạy (không có tray.pid)` thì là trường hợp 1 hoặc
    PowerShell bị chặn, xem log để biết script nào đã được tìm.
+4. Chạy tay `.\run.ps1` mà gặp lỗi `cannot be loaded... is not
+   digitally signed`: đó là do file tải từ internet bị gắn dấu
+   Mark of the Web và policy chặn script không ký. Đây không phải
+   lỗi của bản thân tool chạy qua exe, vì tool gọi PowerShell với
+   `-ExecutionPolicy Bypass` nên dấu này không cản được. Đừng đổi
+   policy toàn máy, chỉ gỡ dấu cho đúng file này (file của chính
+   repo này) rồi chạy lại exe:
+   ```
+   Unblock-File -Path .\run.ps1
+   ```
+   Lưu ý: `run.ps1` không chạy tay trần được, nó cần các tham số
+   `-PidFile/-NotifyFile/-TriggerFile/-LogFile` mà tool tự truyền
+   khi mở tray, nên sau khi gỡ dấu thì chạy lại exe chứ không chạy
+   tay file này.
 
 CI cũng build sẵn hai file này mỗi lần push lên `main` hoặc mở pull
 request (job `build-exe`): vào tab Actions của repo, mở run tương
