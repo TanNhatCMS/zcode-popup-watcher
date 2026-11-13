@@ -3,12 +3,13 @@ module github.com/TanNhatCMS/zcode-popup-watcher/tray-go
 go 1.23
 
 require (
-	github.com/gen2brain/beeep v0.11.3
+	github.com/gen2brain/beeep v0.12.0
 	github.com/getlantern/systray v1.2.2
 )
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/getlantern/context v0.0.0-20190109183933-c447772a6520 // indirect
 	github.com/getlantern/errors v0.0.0-20190325191628-abdb3e3e36f7 // indirect
