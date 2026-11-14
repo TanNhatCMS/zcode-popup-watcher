@@ -121,8 +121,34 @@ func runTrayChild(opts TrayOptions) int {
 	seq := 0
 	failures := 0
 	seen := checker.LoadSeen()
+	wait := time.Duration(0)
+	pendingCheckNow := false
+	outsideLogged := false
 	for {
-		deals, err := checker.QueryDeals(token, deviceMid, ctx.locale, ctx.appVersion, seq)
+		if wait > 0 {
+			// Trigger file "kiểm tra ngay" bypass khung giờ 1 lần.
+			checkNow := sleepWithTrigger(wait)
+			pendingCheckNow = pendingCheckNow || checkNow
+		}
+		wait = interval
+		// Nạp lại settings mỗi vòng: sửa file settings có hiệu lực ngay.
+		settings := checker.LoadDealSettings()
+		checkToken, checkLabel := checkTokenFor(settings.CheckAccount, token)
+		_ = checkLabel
+		// Ngoài khung giờ check → KHÔNG gọi API, ngủ 60s mỗi vòng.
+		if settings.CheckWindowEnabled && !pendingCheckNow {
+			if _, minutes := vnNow(); !settings.InCheckWindow(minutes) {
+				if !outsideLogged {
+					logLine(fmt.Sprintf("[tray-child] Ngoài khung giờ check (%s-%s giờ VN) — KHÔNG gọi API, đợi 60s mỗi vòng.", settings.CheckFrom, settings.CheckTo))
+					outsideLogged = true
+				}
+				wait = 60 * time.Second
+				continue
+			}
+			outsideLogged = false
+		}
+		pendingCheckNow = false
+		deals, err := checker.QueryDeals(checkToken, deviceMid, ctx.locale, ctx.appVersion, seq)
 		if err != nil {
 			failures++
 			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
@@ -130,7 +156,7 @@ func runTrayChild(opts TrayOptions) int {
 				delay = 10 * time.Minute
 			}
 			logLine(fmt.Sprintf("[tray-child] Check lỗi (%v). Đợi %s.", err, delay))
-			time.Sleep(delay)
+			wait = delay
 			continue
 		}
 		seq++
@@ -165,6 +191,6 @@ func runTrayChild(opts TrayOptions) int {
 				logLine(OpenZcode())
 			}
 		}
-		sleepWithTrigger(interval)
+		wait = interval
 	}
 }

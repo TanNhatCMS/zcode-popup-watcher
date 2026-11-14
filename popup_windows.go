@@ -53,6 +53,7 @@ var (
 	procSetTextColor        = gdi32.NewProc("SetTextColor")
 	procSelectObject        = gdi32.NewProc("SelectObject")
 	procCreateSolidBrush    = gdi32.NewProc("CreateSolidBrush")
+	procCreatePen           = gdi32.NewProc("CreatePen")
 	procGetStockObject      = gdi32.NewProc("GetStockObject")
 	procRoundRect           = gdi32.NewProc("RoundRect")
 	procEllipse             = gdi32.NewProc("Ellipse")
@@ -106,10 +107,18 @@ const (
 	dtWordBreak = 0x00000010
 	dtNoPrefix  = 0x00000800
 
+	// ComboBox: dropdownlist chọn tài khoản nhận deal.
+	cbsDropdownList = 0x00000002
+	cbAddString     = 0x00000143
+	cbSetCurSel     = 0x0000014E
+	cbGetCurSel     = 0x00000147
+
 	bkTransparent = 1
 
+	psSolid = 0 // CreatePen style nét liền
+
 	whiteBrushStockConst = 0 // GetStockObject(WHITE_BRUSH)
-	nullPenStockConst    = 5 // GetStockObject(NULL_PEN)
+	nullPenStockConst    = 8 // GetStockObject(NULL_PEN) — chú ý: 5 là NULL_BRUSH, dùng nhầm làm RoundRect fail im lặng!
 
 	// Control IDs của WM_COMMAND (LOWORD wParam).
 	idBtnClaim = 1001
@@ -117,7 +126,6 @@ const (
 	idBtnOpen  = 1003
 
 	idBtnGotIt = 2001
-	idBtnShare = 2002
 )
 
 // Màu lấy từ UI app ZCode (ảnh 1/2): nền navy đậm, accent xanh dương,
@@ -271,19 +279,20 @@ func fillRectColor(hdc uintptr, rect rectI, color uint32) {
 // ---- Popup khi CÓ deal (ảnh 1: banner tối màu + nút Claim) ----
 
 // showDealPopup mở popup nhận deal và BLOCK cho đến khi người dùng
-// chọn: "claim" / "later" / "open" / "none" / "busy".
-func showDealPopup(info popupDealInfo) string {
+// chọn. Kết quả kèm chỉ số tài khoản đã chọn trong combobox (0 = mặc
+// định): "claim" / "later" / "open" / "none" / "busy".
+func showDealPopup(info popupDealInfo) popupChoice {
 	if !popupAcquire() {
-		return "busy"
+		return popupChoice{Choice: "busy"}
 	}
 	defer popupOpenMu.Unlock()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	resultCh := make(chan string, 1)
+	resultCh := make(chan popupChoice, 1)
 	if err := runPopupWindow(info, resultCh); err != nil {
-		resultCh <- "none"
+		resultCh <- popupChoice{Choice: "none"}
 	}
 	return <-resultCh
 }
@@ -297,11 +306,13 @@ type drawLine struct {
 }
 
 type popupState struct {
-	resultCh chan string
-	lines    []drawLine
+	resultCh  chan popupChoice
+	lines     []drawLine
+	accounts  []accountChoice
+	comboHwnd uintptr // combobox chọn tài khoản (0 = không có, 1 lựa chọn)
 }
 
-func runPopupWindow(info popupDealInfo, resultCh chan string) error {
+func runPopupWindow(info popupDealInfo, resultCh chan popupChoice) error {
 	if err := procRegisterClassExW.Find(); err != nil {
 		return err
 	}
@@ -309,7 +320,7 @@ func runPopupWindow(info popupDealInfo, resultCh chan string) error {
 	defer procSetThreadDpiCtx.Call(oldCtx)
 
 	dpi := sysDPI()
-	state := &popupState{resultCh: resultCh}
+	state := &popupState{resultCh: resultCh, accounts: info.Accounts}
 
 	const winW = 470
 	W := scaleValue(winW, dpi)
@@ -320,9 +331,10 @@ func runPopupWindow(info popupDealInfo, resultCh chan string) error {
 	fontTitle := newUIFont(dpi, 700, -17)
 	fontQuota := newUIFont(dpi, 700, -26)
 	fontBody := newUIFont(dpi, 400, -14)
+	fontSmall := newUIFont(dpi, 400, -12)
 	// Font phải sống đến khi WM_PAINT chạy xong (trong message loop)
 	// nên chỉ giải phóng sau khi loop kết thúc.
-	fonts := []uiFont{fontHeader, fontTitle, fontQuota, fontBody}
+	fonts := []uiFont{fontHeader, fontTitle, fontQuota, fontBody, fontSmall}
 	defer func() {
 		for i := range fonts {
 			fonts[i].release()
@@ -397,8 +409,24 @@ func runPopupWindow(info popupDealInfo, resultCh chan string) error {
 	if info.Quota == nil && len(info.Entitlements) > 0 {
 		addLine("Bạn nhận được:\n"+joinLines(info.Entitlements), fontBody, colTextGrey, 0)
 	}
+	// Tài khoản ZCode đang đăng nhập — deal sẽ nhận về đúng tài khoản
+	// này (JWT từ ~/.zcode/v2, hiển thị tên/email, không hiện token).
+	if info.Account != "" {
+		addLine("Tài khoản: "+info.Account, fontSmall, colTextGrey, 0)
+	}
 
 	buttonY := y + int32(scaleValue(16, dpi))
+	// Hàng combobox chọn tài khoản (chỉ khi có ≥2 lựa chọn): nhãn nhỏ
+	// + dropdownlist đặt ngay trên hàng nút.
+	comboY := int32(0)
+	state.comboHwnd = 0
+	if len(info.Accounts) > 1 {
+		addLine("Nhận về tài khoản:", fontSmall, colTextGrey, 4)
+		comboH := scaleValue(26, dpi)
+		comboY = y
+		y += int32(comboH) + int32(scaleValue(10, dpi))
+		buttonY = y + int32(scaleValue(6, dpi))
+	}
 	contentH := int(buttonY) + btnH + margins
 	H := maxInt(contentH, scaleValue(210, dpi))
 	if H > int(screenH)-scaleValue(80, dpi) {
@@ -466,6 +494,28 @@ func runPopupWindow(info popupDealInfo, resultCh chan string) error {
 		claimLabel = "Nhận deal"
 	}
 
+	// Combobox chọn tài khoản nhận deal: mục 0 là tài khoản mặc định
+	// đang đăng nhập trong ZCode, tiếp theo là các tài khoản cockpit.
+	if len(info.Accounts) > 1 {
+		comboW := W - 2*margins
+		state.comboHwnd, _, _ = procCreateWindowExW.Call(
+			0,
+			uintptr(unsafe.Pointer(utf16Ptr("COMBOBOX"))),
+			uintptr(0),
+			uintptr(wsChild|wsVisible|cbsDropdownList),
+			uintptr(int32(margins)), uintptr(int32(comboY)), uintptr(uint32(comboW)), uintptr(uint32(scaleValue(160, dpi))),
+			hwnd, 0, hInstance, 0,
+		)
+		if state.comboHwnd != 0 {
+			procSendMessageW.Call(state.comboHwnd, uintptr(wmSetFont), fontButton.handle, 1)
+			for _, choice := range info.Accounts {
+				textPtr := uintptr(unsafe.Pointer(utf16Ptr(choice.Label)))
+				procSendMessageW.Call(state.comboHwnd, uintptr(cbAddString), 0, textPtr)
+			}
+			procSendMessageW.Call(state.comboHwnd, uintptr(cbSetCurSel), 0, 0)
+		}
+	}
+
 	btnW := scaleValue(130, dpi)
 	hClaim := createControl("BUTTON", claimLabel, bsDefPushButton|bsPushButton, hInstance, margins, int(buttonY), btnW, btnH, hwnd, idBtnClaim)
 	procSendMessageW.Call(hClaim, uintptr(wmSetFont), fontButton.handle, 1)
@@ -495,20 +545,20 @@ func popupWndProc(state *popupState) func(hwnd syscall.Handle, msg uint32, wPara
 		case wmCommand:
 			switch wParam & 0xFFFF {
 			case idBtnClaim:
-				sendPopupResult(state, "claim")
+				sendPopupResult(state, "claim", selectedAccountIdx(state))
 				procDestroyWindow.Call(uintptr(hwnd))
 				return 0
 			case idBtnOpen:
-				sendPopupResult(state, "open")
+				sendPopupResult(state, "open", 0)
 				procDestroyWindow.Call(uintptr(hwnd))
 				return 0
 			case idBtnLater:
-				sendPopupResult(state, "later")
+				sendPopupResult(state, "later", 0)
 				procDestroyWindow.Call(uintptr(hwnd))
 				return 0
 			}
 		case wmClose:
-			sendPopupResult(state, "later")
+			sendPopupResult(state, "later", 0)
 			procDestroyWindow.Call(uintptr(hwnd))
 			return 0
 		case wmEraseBkgnd:
@@ -544,9 +594,22 @@ func paintDealPopup(state *popupState, hdc uintptr, rc rectI) {
 	}
 }
 
-func sendPopupResult(state *popupState, choice string) {
+// selectedAccountIdx đọc lựa chọn hiện tại của combobox tài khoản
+// (mục 0 = mặc định); không có combobox → 0.
+func selectedAccountIdx(state *popupState) int {
+	if state.comboHwnd == 0 {
+		return 0
+	}
+	idx, _, _ := procSendMessageW.Call(state.comboHwnd, uintptr(cbGetCurSel), 0, 0)
+	if int32(idx) < 0 {
+		return 0
+	}
+	return int(idx)
+}
+
+func sendPopupResult(state *popupState, choice string, accountIdx int) {
 	select {
-	case state.resultCh <- choice:
+	case state.resultCh <- popupChoice{Choice: choice, AccountIdx: accountIdx}:
 	default:
 	}
 }

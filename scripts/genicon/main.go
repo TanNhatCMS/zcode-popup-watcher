@@ -43,17 +43,19 @@ func main() {
 	}
 
 	// 1) Icon app (exe resource + preview PNG): chuông + chấm cam.
-	writeICO(filepath.Join(outDir, "app-icon.ico"), drawIcon(512, true), true)
-	writePNG(filepath.Join(outDir, "app-icon.png"), drawIcon(512, true))
+	// 256 dùng bản chi tiết; các size nhỏ (48/32/16) dùng bản compact
+	// để title bar/tray vẫn đọc ra là chuông.
+	writeICO(filepath.Join(outDir, "app-icon.ico"), true, true)
+	writePNG(filepath.Join(outDir, "app-icon.png"), true)
 
 	// 2) Icon tray: thường (chuông trơn) + alert (chuông + chấm cam)
 	// — khớp thiết kế app, thay bộ icon cũ của tray.
-	writeICO(filepath.Join(outDir, "icon.ico"), drawIcon(512, false), false)
-	writeICO(filepath.Join(outDir, "icon-alert.ico"), drawIcon(512, true), false)
+	writeICO(filepath.Join(outDir, "icon.ico"), false, false)
+	writeICO(filepath.Join(outDir, "icon-alert.ico"), true, false)
 
 	// Tự kiểm tra: 4 góc icon phải trong suốt (alpha 0) — nếu resize
 	// làm mất alpha, icon trong tray sẽ hiện thành ô vuông đen.
-	chk := resize(drawIcon(512, true), 256, 256)
+	chk := resize(drawIcon(512, true, false), 256, 256)
 	for _, pt := range [][2]int{{0, 0}, {255, 0}, {0, 255}, {255, 255}, {6, 6}} {
 		if a := chk.RGBAAt(pt[0], pt[1]).A; a != 0 {
 			log.Fatalf("góc icon (%d,%d) không trong suốt: alpha = %d", pt[0], pt[1], a)
@@ -62,10 +64,10 @@ func main() {
 	log.Print("Đã tạo assets/app-icon.ico, app-icon.png, icon.ico, icon-alert.ico (góc trong suốt OK)")
 }
 
-// writePNG ghi bản xem trước 256.
-func writePNG(path string, src *image.RGBA) {
+// writePNG ghi bản xem trước 256 (bản chi tiết).
+func writePNG(path string, withDot bool) {
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, resize(src, 256, 256)); err != nil {
+	if err := png.Encode(&buf, resize(drawIcon(512, withDot, false), 256, 256)); err != nil {
 		log.Fatal(err)
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -73,29 +75,37 @@ func writePNG(path string, src *image.RGBA) {
 	}
 }
 
-// writeICO ghi file .ico từ bản vẽ 512; withPNG256 nhúng thêm entry
-// 256 dạng PNG (chuẩn cho kích thước lớn nhất).
-func writeICO(path string, src *image.RGBA, withPNG256 bool) {
+// writeICO ghi file .ico; withPNG256 nhúng thêm entry 256 dạng PNG
+// (chuẩn cho kích thước lớn nhất). 64px dùng bản chi tiết, ≤48px dùng
+// bản compact.
+func writeICO(path string, withDot, withPNG256 bool) {
 	var entries []icoImage
 	if withPNG256 {
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, resize(src, 256, 256)); err != nil {
-			log.Fatal(err)
-		}
-		entries = append(entries, icoImage{w: 256, h: 256, data: buf.Bytes()})
+		entries = append(entries, icoImage{w: 256, h: 256, data: pngBytes(drawIcon(512, withDot, false))})
 	}
-	// Các kích thước nhỏ: DIB 32bpp (XOR BGRA bottom-up + AND mask).
-	for _, size := range []int{64, 48, 32, 16} {
-		entries = append(entries, icoImage{w: size, h: size, data: dibFrom(resize(src, size, size))})
+	entries = append(entries, icoImage{w: 64, h: 64, data: dibFrom(resize(drawIcon(512, withDot, false), 64, 64))})
+	for _, size := range []int{48, 32, 16} {
+		entries = append(entries, icoImage{w: size, h: size, data: dibFrom(resize(drawIcon(512, withDot, true), size, size))})
 	}
 	if err := os.WriteFile(path, buildICO(entries), 0o644); err != nil {
 		log.Fatal(err)
 	}
 }
 
+func pngBytes(src *image.RGBA) []byte {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, resize(src, 256, 256)); err != nil {
+		log.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 // drawIcon vẽ icon ở kích thước bất kỳ (tọa độ scale theo size/512).
-// withDot: có chấm cam "có deal mới" (biến thể alert của tray).
-func drawIcon(size int, withDot bool) *image.RGBA {
+// withDot: chấm cam "có deal mới". compact: bố cục rút gọn cho kích
+// thước nhỏ (≤48px — title bar/tray/Explorer) — khối to, tương phản,
+// ít chi tiết mịn để ở 16px vẫn đọc ra là chuông; co thiết kế chi
+// tiết xuống 16px sẽ thành cục trắng mờ.
+func drawIcon(size int, withDot, compact bool) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	s := float64(size) / 512.0
 	px := func(v int) float64 { return float64(v) * s }
@@ -103,18 +113,33 @@ func drawIcon(size int, withDot bool) *image.RGBA {
 	// Nền navy bo góc, gradient dọc nhẹ cho có chiều sâu.
 	roundRectGradient(img, px(8), px(8), px(504), px(504), px(104), colNavyTop, colNavyBot)
 
-	// Chuông trắng: núm → vòm → thân → loa → thanh đáy → lục lạc con.
-	fillCircle(img, px(256), px(96), px(18), colBell)                   // núm trên
-	fillCircle(img, px(256), px(224), px(114), colBell)                 // vòm
-	fillRect(img, px(142), px(224), px(370), px(288), colBell)          // thân
-	fillEllipse(img, px(256), px(296), px(140), px(38), colBell)        // loa
-	roundRect(img, px(116), px(316), px(396), px(340), px(10), colBell) // thanh đáy
-	fillCircle(img, px(256), px(362), px(24), colBell)                  // lục lạc
+	if compact {
+		// Chuông to bản: núm → vòm → thân → loa dày → thanh đáy → lục lạc.
+		fillCircle(img, px(256), px(90), px(24), colBell)                   // núm
+		fillCircle(img, px(256), px(238), px(128), colBell)                 // vòm
+		fillRect(img, px(128), px(238), px(384), px(292), colBell)          // thân
+		fillEllipse(img, px(256), px(304), px(152), px(44), colBell)        // loa
+		roundRect(img, px(110), px(350), px(402), px(382), px(14), colBell) // thanh đáy
+		fillCircle(img, px(256), px(416), px(28), colBell)                  // lục lạc
+	} else {
+		// Bản chi tiết cho kích thước lớn (≥64px).
+		fillCircle(img, px(256), px(96), px(18), colBell)                   // núm trên
+		fillCircle(img, px(256), px(224), px(114), colBell)                 // vòm
+		fillRect(img, px(142), px(224), px(370), px(288), colBell)          // thân
+		fillEllipse(img, px(256), px(296), px(140), px(38), colBell)        // loa
+		roundRect(img, px(116), px(316), px(396), px(340), px(10), colBell) // thanh đáy
+		fillCircle(img, px(256), px(362), px(24), colBell)                  // lục lạc
+	}
 	if withDot {
 		// Chấm cam "có deal mới" — viền navy tách khỏi chuông.
-		ringCol := colNavyTop // dùng màu nền đậm làm viền, đủ phân tách
-		fillCircle(img, px(396), px(150), px(56), ringCol)
-		fillCircle(img, px(396), px(150), px(46), colDot)
+		ringCol := colNavyTop
+		if compact {
+			fillCircle(img, px(402), px(124), px(66), ringCol)
+			fillCircle(img, px(402), px(124), px(52), colDot)
+		} else {
+			fillCircle(img, px(396), px(150), px(56), ringCol)
+			fillCircle(img, px(396), px(150), px(46), colDot)
+		}
 	}
 	return img
 }

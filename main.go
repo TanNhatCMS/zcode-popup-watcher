@@ -24,22 +24,30 @@ Cách dùng:
       Không tham số: tự mở tray (tương đương lệnh tray).
 
 Lệnh:
-  check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--no-popup] [--dry-run] [--self-test]
+  check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--no-popup] [--no-window]
+        [--account EMAIL|default] [--from HH:MM] [--to HH:MM] [--dry-run] [--self-test]
       Kiểm tra deal qua API marketing/touch. Mặc định poll liên tục
-      mỗi 600 giây; --once chỉ kiểm tra 1 lần rồi thoát.
-      Có deal có thể nhận: hiện popup vẽ giống app ZCode (ảnh banner,
-      mô tả đầy đủ, quyền lợi thật của plan) — bấm "Nhận deal" tool
-      mới claim giúp bạn, không bấm thì không claim gì cả.
+      mỗi 600 giây; --once chỉ kiểm tra 1 lần rồi thoát (bỏ qua khung
+      giờ). Có deal có thể nhận: hiện popup vẽ giống app ZCode (mô tả
+      đầy đủ, quyền lợi thật của plan, chọn tài khoản nhận) — bấm
+      "Nhận deal" tool mới claim giúp bạn.
+      Tài khoản check: --account đè settings; khung giờ mặc định
+      17:55-22:10 giờ VN — NGOÀI khung giờ KHÔNG gọi API (chỉ ngủ
+      chờ), tắt bằng --no-window hoặc bỏ tick trong menu tray.
   watch [tùy chọn như check]
       Giống check (poll liên tục).
   tray [--interval GIÂY] [--config-dir DIR] [--open]
       Trên Windows: mở app tray (icon + menu native + popup nhận deal).
       Ngoài Windows: chạy daemon tách rời, lệnh thoát ngay, tắt được
       terminal.
-  claim [--config-dir DIR] [--list]
+  claim [--config-dir DIR] [--list] [--account EMAIL|default]
       Nhận deal đang chờ (pending-claim.json) theo xác nhận y/N trong
-      terminal — dùng khi không bấm được popup. --list xem các plan
-      nhận được qua API billing/preview.
+      terminal — dùng khi không bấm được popup. --account chọn tài
+      khoản nhận (mặc định hoặc tài khoản cockpit-tools); --list xem
+      các plan nhận được qua API billing/preview.
+  account [--config-dir DIR]
+      In thông tin tài khoản ZCode đang đăng nhập (từ userinfo của
+      app gốc: tên hiển thị, email, ID).
   status
       Daemon / app tray có đang chạy không? Xem vài dòng log cuối.
   stop
@@ -134,6 +142,8 @@ func run(argv []string) int {
 		return handleStop()
 	case "claim":
 		return runClaim(args, bools)
+	case "account":
+		return runAccount(args)
 	case "reminder":
 		return runReminder(args, bools)
 	case "self-test":

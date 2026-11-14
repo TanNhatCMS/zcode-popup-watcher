@@ -24,6 +24,7 @@ type ticketState struct {
 	planName string
 	quota    *planQuotaView
 	endsAt   int64
+	account  string
 	heading  string
 	subline  string
 
@@ -69,6 +70,7 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 
 	state.planName = info.PlanName
 	state.endsAt = info.EndsAt
+	state.account = info.Account
 	if info.Quota != nil {
 		state.quota = &planQuotaView{
 			Amount:  info.Quota.FormatAmount(),
@@ -98,7 +100,7 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 
 	// Tấm vé trắng: card ở 1/3 trên, chiếm ~62% chiều cao.
 	cardW := int32(W - scaleValue(64, dpi))
-	cardH := int32(scaleValue(210, dpi))
+	cardH := int32(scaleValue(236, dpi)) // đủ chỗ cho dòng tài khoản dưới ngày hết hạn
 	state.cardX = int32(scaleValue(32, dpi))
 	state.cardY = int32(scaleValue(52, dpi))
 	state.cardW, state.cardH = cardW, cardH
@@ -158,14 +160,10 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 
 	btnW := scaleValue(120, dpi)
 	btnH := scaleValue(36, dpi)
-	gap := scaleValue(16, dpi)
-	btnY := H - scaleValue(74, dpi)
-	btnTotal := 2*btnW + gap
-	btnX := (W - btnTotal) / 2
+	btnY := H - scaleValue(104, dpi) // nâng lên cho thoáng đáy cửa sổ
+	btnX := (W - btnW) / 2
 	hOk := createControl("BUTTON", "Đã hiểu", bsDefPushButton|bsPushButton, hInstance, btnX, btnY, btnW, btnH, hwnd, idBtnGotIt)
 	procSendMessageW.Call(hOk, uintptr(wmSetFont), fontButton.handle, 1)
-	hShare := createControl("BUTTON", "Chia sẻ", bsPushButton, hInstance, btnX+btnW+gap, btnY, btnW, btnH, hwnd, idBtnShare)
-	procSendMessageW.Call(hShare, uintptr(wmSetFont), fontButton.handle, 1)
 
 	procShowWindow.Call(hwnd, uintptr(swShow))
 	procSetForegroundWindow.Call(hwnd)
@@ -189,10 +187,6 @@ func ticketWndProc(state *ticketState) func(hwnd syscall.Handle, msg uint32, wPa
 			switch wParam & 0xFFFF {
 			case idBtnGotIt:
 				sendTicketResult(state, "ok")
-				procDestroyWindow.Call(uintptr(hwnd))
-				return 0
-			case idBtnShare:
-				sendTicketResult(state, "share")
 				procDestroyWindow.Call(uintptr(hwnd))
 				return 0
 			}
@@ -249,11 +243,13 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 	defer fontHeading.release()
 	defer fontSub.release()
 
-	// Tấm vé trắng bo góc: brush trắng + pen null (không viền).
+	// Tấm vé trắng bo góc: brush trắng + pen viền xám nhạt (có outline
+	// cho giống vé của app); pen NULL_PEN dùng cho 2 notch (chỉ fill).
 	whiteBrush, _, _ := procGetStockObject.Call(uintptr(whiteBrushStockConst))
 	nullPen, _, _ := procGetStockObject.Call(uintptr(nullPenStockConst))
+	borderPen, _, _ := procCreatePen.Call(uintptr(psSolid), 1, uintptr(colSepGrey))
 	oldBrush, _, _ := procSelectObject.Call(hdc, whiteBrush)
-	oldPen, _, _ := procSelectObject.Call(hdc, nullPen)
+	oldPen, _, _ := procSelectObject.Call(hdc, borderPen)
 	procRoundRect.Call(
 		hdc,
 		uintptr(state.cardX), uintptr(state.cardY),
@@ -264,6 +260,7 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 	notchR := int32(scaleValue(9, dpi))
 	notchBrush, _, _ := procCreateSolidBrush.Call(uintptr(colBgNavy))
 	oldNotchBrush, _, _ := procSelectObject.Call(hdc, notchBrush)
+	oldNotchPen, _, _ := procSelectObject.Call(hdc, nullPen)
 	procEllipse.Call(hdc,
 		uintptr(state.cardX-notchR), uintptr(state.sepY-notchR),
 		uintptr(state.cardX+notchR), uintptr(state.sepY+notchR),
@@ -272,8 +269,11 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 		uintptr(state.cardX+state.cardW-notchR), uintptr(state.sepY-notchR),
 		uintptr(state.cardX+state.cardW+notchR), uintptr(state.sepY+notchR),
 	)
+	procSelectObject.Call(hdc, oldNotchPen)
 	procSelectObject.Call(hdc, oldNotchBrush)
 	procDeleteObject.Call(notchBrush)
+	procSelectObject.Call(hdc, oldPen)
+	procDeleteObject.Call(borderPen)
 	procSelectObject.Call(hdc, oldBrush)
 	procSelectObject.Call(hdc, oldPen)
 
@@ -325,7 +325,7 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 	procDeleteObject.Call(dashBrush)
 
 	// "Hạn dùng đến" + thời gian kết thúc (ends_at epoch giây →
-	// toLocaleString kiểu en-US như app gốc).
+	// toLocaleString kiểu en-US như app gốc) + tài khoản nhận deal.
 	belowSep := state.sepY + int32(scaleValue(12, dpi))
 	drawTextBlock(hdc, fontSmall.handle, "Hạn dùng đến", cardTextR(belowSep, belowSep+int32(scaleValue(18, dpi))), colTextMid, dtSingle)
 	if state.endsAt > 0 {
@@ -333,6 +333,11 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 			time.Unix(state.endsAt, 0).Format("01/02/2006, 3:04:05 PM"),
 			cardTextR(belowSep+int32(scaleValue(18, dpi)), belowSep+int32(scaleValue(40, dpi))),
 			colTextDark, dtSingle)
+	}
+	if state.account != "" {
+		drawTextBlock(hdc, fontSmall.handle, "Tài khoản: "+state.account,
+			cardTextR(belowSep+int32(scaleValue(42, dpi)), belowSep+int32(scaleValue(60, dpi))),
+			colTextMid, dtSingle)
 	}
 
 	// Heading + subline dưới card (trên nền tối).

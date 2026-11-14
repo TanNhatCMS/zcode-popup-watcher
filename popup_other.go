@@ -7,8 +7,8 @@ package main
 // người dùng nhận bằng lệnh `zcode-deal claim`; báo bằng toast hệ thống.
 
 // showDealPopup trả "none" — caller hiểu là không có popup, không chặn.
-func showDealPopup(info popupDealInfo) string {
-	return "none"
+func showDealPopup(info popupDealInfo) popupChoice {
+	return popupChoice{Choice: "none"}
 }
 
 // alertBox không có GUI tương đương trên non-Windows; bỏ qua (đã có

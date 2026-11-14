@@ -15,7 +15,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -50,15 +49,40 @@ type claimContext struct {
 	deviceMid  string
 	locale     string
 	appVersion string
+	account    checker.AccountInfo // tài khoản đang đăng nhập (cho popup/CLI)
 }
 
 func newClaimContext(token, deviceMid string) claimContext {
-	return claimContext{
+	ctx := claimContext{
 		token:      token,
 		deviceMid:  deviceMid,
 		locale:     localeOrDefault(),
 		appVersion: appVersionOrDefault(),
 	}
+	// Lấy thông tin tài khoản 1 lần cho cả phiên (popup + CLI);
+	// lỗi mạng bỏ qua im lặng — popup chỉ ẩn dòng tài khoản.
+	if account, err := checker.FetchAccountInfo(token); err == nil {
+		ctx.account = account
+	} else if token != "" {
+		logLine(fmt.Sprintf("[claim] Không lấy được thông tin tài khoản: %v", err))
+	}
+	return ctx
+}
+
+// accountLabel render dòng hiển thị tài khoản: "tên · email" (bỏ phần
+// trùng lặp nếu tên chính là email).
+func accountLabel(a checker.AccountInfo) string {
+	name := a.Username
+	if name == "" {
+		name = a.Email
+	}
+	if name == "" {
+		return ""
+	}
+	if a.Email != "" && a.Email != name {
+		return name + " · " + a.Email
+	}
+	return name
 }
 
 func resolveClaimContext(configDir string) (claimContext, error) {
@@ -92,6 +116,70 @@ func recordPendingClaim(fresh []checker.Deal) {
 		deal.Key, deal.PlanID))
 }
 
+// accountChoice là 1 lựa chọn "nhận deal về tài khoản nào" trên popup:
+// mặc định là tài khoản đang đăng nhập trong ZCode, tiếp theo là các
+// tài khoản lưu trong cockpit-tools.
+type accountChoice struct {
+	Label     string
+	Token     string // JWT dùng để claim
+	IsDefault bool
+}
+
+// popupChoice là kết quả đóng popup deal (lựa chọn tài khoản đi kèm
+// khi claim).
+type popupChoice struct {
+	Choice     string // claim / later / open / none / busy
+	AccountIdx int    // chỉ số trong popupDealInfo.Accounts (0 = mặc định)
+}
+
+// buildAccountChoices dựng danh sách: mặc định (JWT từ ~/.zcode/v2)
+// + các tài khoản cockpit-tools có JWT. Tài khoản cockpit trùng email
+// với mặc định vẫn giữ (token có thể khác).
+func buildAccountChoices(ctx claimContext) []accountChoice {
+	var choices []accountChoice
+	defaultLabel := accountLabel(ctx.account)
+	if defaultLabel == "" {
+		if ctx.token == "" {
+			defaultLabel = "Tài khoản đang đăng nhập trong ZCode (chưa có token)"
+		} else {
+			defaultLabel = "Tài khoản đang đăng nhập trong ZCode"
+		}
+	}
+	choices = append(choices, accountChoice{
+		Label:     "Mặc định: " + defaultLabel,
+		Token:     ctx.token,
+		IsDefault: true,
+	})
+	for _, acc := range checker.ListCockpitZcodeAccounts() {
+		if acc.JWT == "" {
+			continue
+		}
+		label := acc.Email
+		if label == "" {
+			label = acc.DisplayName
+		}
+		if label == "" {
+			label = acc.ID
+		}
+		if acc.PlanType != "" {
+			label += " (" + acc.PlanType + ")"
+		}
+		choices = append(choices, accountChoice{Label: label, Token: acc.JWT})
+	}
+	return choices
+}
+
+// ctxForAccount tạo claimContext với token của tài khoản đã chọn
+// (userinfo fetch lại theo token đó để vé hiển thị đúng người nhận).
+func ctxForAccount(ctx claimContext, token string) claimContext {
+	out := ctx
+	out.token = token
+	if account, err := checker.FetchAccountInfo(token); err == nil {
+		out.account = account
+	}
+	return out
+}
+
 // popupDealInfo là toàn bộ chi tiết popup cần vẽ khi CÓ deal (bố cục
 // như banner tối màu của app: header plan → title → số token lớn → mô
 // tả → nút bấm).
@@ -100,18 +188,19 @@ type popupDealInfo struct {
 	Desc         string
 	PlanName     string             // nhãn header kiểu "ZCODE GLOBAL BUILD"
 	Quota        *checker.PlanQuota // số token lớn (nếu đọc được)
+	Account      string             // tài khoản ZCode đang đăng nhập
 	ButtonLabel  string
 	Entitlements []string
+	Accounts     []accountChoice // chọn tài khoản nhận deal (≥2 mới hiện combobox)
 }
 
 // ticketInfo là dữ liệu popup vé SAU KHI nhận deal thành công (bố cục
-// như dialog kết quả của app: tấm vé trắng + hạn dùng đến + Đã hiểu/
-// Chia sẻ).
+// như dialog kết quả của app: tấm vé trắng + hạn dùng đến + Đã hiểu).
 type ticketInfo struct {
-	PlanName  string
-	Quota     *checker.PlanQuota
-	EndsAt    int64  // epoch giây
-	ShareText string // nội dung chép vào clipboard khi bấm Chia sẻ
+	PlanName string
+	Quota    *checker.PlanQuota
+	EndsAt   int64 // epoch giây
+	Account  string
 }
 
 // buildPopupDealInfo gom chi tiết deal cho popup: dữ liệu vé từ
@@ -122,6 +211,7 @@ func buildPopupDealInfo(deal checker.Deal, ctx claimContext) popupDealInfo {
 		Title:       deal.Title,
 		Desc:        deal.Desc,
 		ButtonLabel: deal.ButtonLabel,
+		Account:     accountLabel(ctx.account),
 	}
 	// Dữ liệu vé khai báo ngay trong payload (args.zcode_plan) — ưu
 	// tiên nguồn này vì là thứ app gốc dùng để vẽ vé.
@@ -202,12 +292,19 @@ func offerDealClaim(fresh []checker.Deal, ctx claimContext, wait bool) {
 // chi tiết".
 func runClaimPopupFlow(deal checker.Deal, ctx claimContext) {
 	info := buildPopupDealInfo(deal, ctx)
-	choice := showDealPopup(info)
-	switch choice {
+	info.Accounts = buildAccountChoices(ctx)
+	res := showDealPopup(info)
+	switch res.Choice {
 	case "claim":
-		summary, ok, result := claimDeal(deal, ctx)
+		// Claim bằng token của tài khoản người dùng đã chọn trong
+		// combobox (0 = tài khoản mặc định đang đăng nhập ZCode).
+		target := ctx
+		if idx := res.AccountIdx; idx > 0 && idx < len(info.Accounts) {
+			target = ctxForAccount(ctx, info.Accounts[idx].Token)
+		}
+		summary, ok, result := claimDeal(deal, target)
 		if ok {
-			showClaimSuccessUI(deal, ctx, result, summary)
+			showClaimSuccessUI(deal, target, result)
 		} else {
 			alertBox("ZCode Deal - Chưa nhận được", summary, true)
 		}
@@ -285,11 +382,11 @@ func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.Claim
 // của app) từ dữ liệu claim: quota từ args.zcode_plan của deal (ưu
 // tiên) hoặc billing/preview, ends_at từ response claim. Non-Windows
 // chỉ log (đã in trong claimDeal).
-func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.ClaimResult, summary string) {
+func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.ClaimResult) {
 	info := ticketInfo{
-		PlanName:  result.Plan.Name,
-		ShareText: summary,
-		EndsAt:    result.EndsAt,
+		PlanName: result.Plan.Name,
+		EndsAt:   result.EndsAt,
+		Account:  accountLabel(ctx.account),
 	}
 	if info.PlanName == "" && deal.ZcodePlan != nil {
 		info.PlanName = deal.ZcodePlan.Name
@@ -310,24 +407,7 @@ func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.Clai
 	if info.Quota == nil && len(result.Plan.Entitlements) > 0 {
 		info.Quota = checker.QuotaFromEntitlements(result.Plan.Entitlements)
 	}
-	choice := showClaimSuccessPopup(info)
-	if choice == "share" {
-		if err := copyToClipboard(info.ShareText); err == nil {
-			logLine("[claim] Đã chép nội dung vé vào clipboard.")
-		} else {
-			logLine(fmt.Sprintf("[claim] Không chép được clipboard: %v", err))
-		}
-	}
-}
-
-// copyToClipboard chép text vào clipboard Windows bằng PowerShell
-// (Set-Clipboard). Text đi qua base64 để tránh mọi vấn đề escaping
-// dấu nháy khi nhúng vào dòng lệnh.
-func copyToClipboard(text string) error {
-	b64 := base64.StdEncoding.EncodeToString([]byte(text))
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		fmt.Sprintf("Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')))", b64))
-	return cmd.Run()
+	showClaimSuccessPopup(info)
 }
 
 func planSummary(result checker.ClaimResult) string {
@@ -368,6 +448,28 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 		fmt.Println("[claim] Thường do chạy khác user/máy với ZCode, hoặc chưa mở ZCode lần nào.")
 		return 2
 	}
+	// --account <email|id>: nhận deal bằng JWT của tài khoản lưu trong
+	// cockpit-tools thay vì tài khoản mặc định đang đăng nhập ZCode.
+	if want := strings.TrimSpace(args["account"]); want != "" && !strings.EqualFold(want, "default") {
+		matched := -1
+		for i, acc := range checker.ListCockpitZcodeAccounts() {
+			if strings.EqualFold(acc.Email, want) || strings.EqualFold(acc.ID, want) {
+				matched = i
+				break
+			}
+		}
+		if matched < 0 {
+			fmt.Printf("[claim] Không tìm thấy tài khoản %q trong cockpit-tools.\n", want)
+			return 1
+		}
+		acc := checker.ListCockpitZcodeAccounts()[matched]
+		if acc.JWT == "" {
+			fmt.Printf("[claim] Tài khoản %s không có JWT lưu trong cockpit-tools.\n", acc.Email)
+			return 1
+		}
+		fmt.Printf("[claim] Claim bằng tài khoản cockpit: %s\n", acc.Email)
+		ctx = ctxForAccount(ctx, acc.JWT)
+	}
 	if bools["list"] {
 		plans, err := checker.PreviewClaimPlans(ctx.token, ctx.appVersion)
 		if err != nil {
@@ -392,6 +494,9 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 		fmt.Println("[claim] Không có deal nào đang chờ nhận (pending-claim.json rỗng).")
 		fmt.Println("[claim] Đợi tool báo deal mới, hoặc mở ZCode xem trong app.")
 		return 1
+	}
+	if label := accountLabel(ctx.account); label != "" {
+		fmt.Printf("[claim] Tài khoản: %s\n", label)
 	}
 	fmt.Printf("[claim] Deal đang chờ: [%s] %s\n", pending.Position, pending.Title)
 	fmt.Printf("[claim] Chi tiết: %s\n", pending.Detail)
@@ -441,6 +546,39 @@ func readConsoleLine() string {
 		return ""
 	}
 	return scanner.Text()
+}
+
+// runAccount là lệnh `zcode-deal account`: in thông tin tài khoản
+// ZCode đang đăng nhập — lấy từ userinfo endpoint của app gốc với
+// zcodejwttoken (chỉ hiện tên/email/ID, không bao giờ hiện token).
+func runAccount(args map[string]string) int {
+	configDir := checker.ConfigDir(args["config-dir"])
+	_, token, err := resolveAuth(configDir)
+	if err != nil {
+		fmt.Printf("[account] LỖI auth: %v\n", err)
+		return 2
+	}
+	if token == "" {
+		fmt.Println("[account] Không có token đăng nhập trong ~/.zcode/v2 — mở ZCode, đăng nhập rồi thử lại.")
+		return 1
+	}
+	fmt.Println("[account] Đang lấy thông tin từ userinfo của app gốc...")
+	info, err := checker.FetchAccountInfo(token)
+	if err != nil {
+		fmt.Printf("[account] LỖI: %v\n", err)
+		return 1
+	}
+	if info.Username != "" {
+		fmt.Printf("[account] Tên hiển thị: %s\n", info.Username)
+	}
+	if info.Email != "" {
+		fmt.Printf("[account] Email: %s\n", info.Email)
+	}
+	if info.ID != "" {
+		fmt.Printf("[account] ID: %s\n", info.ID)
+	}
+	fmt.Printf("[account] Nguồn: %s\n", info.Source)
+	return 0
 }
 
 // openURL mở link (open_url action) bằng trình duyệt mặc định.

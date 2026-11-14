@@ -22,6 +22,10 @@ type checkOptions struct {
 	appVersion string
 	autoOpen   bool
 	noPopup    bool
+	noWindow   bool   // --no-window: bỏ qua khung giờ check
+	account    string // --account: override tài khoản check (flag > settings)
+	from       string
+	to         string
 	once       bool
 	dryRun     bool
 	selfTest   bool
@@ -34,6 +38,19 @@ func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOpt
 			intervalSec = n
 		}
 	}
+	// Nền là settings lưu bền (menu tray chỉnh được); flag CLI đè lên.
+	settings := checker.LoadDealSettings()
+	account := settings.CheckAccount
+	if v := strings.TrimSpace(args["account"]); v != "" {
+		account = v
+	}
+	from, to := settings.CheckFrom, settings.CheckTo
+	if v := strings.TrimSpace(args["from"]); v != "" {
+		from = v
+	}
+	if v := strings.TrimSpace(args["to"]); v != "" {
+		to = v
+	}
 	return checkOptions{
 		configDir:  args["config-dir"],
 		interval:   time.Duration(intervalSec) * time.Second,
@@ -41,6 +58,10 @@ func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOpt
 		appVersion: appVersionOrDefault(),
 		autoOpen:   bools["open"],
 		noPopup:    bools["no-popup"],
+		noWindow:   bools["no-window"],
+		account:    account,
+		from:       from,
+		to:         to,
 		once:       bools["once"],
 		dryRun:     bools["dry-run"],
 		selfTest:   bools["self-test"],
@@ -72,6 +93,8 @@ func runSelfTest() int {
 
 func runDryRun(opts checkOptions) int {
 	summary := checker.DescribeConfig(checker.ConfigDir(opts.configDir))
+	settings := checker.LoadDealSettings()
+	_ = settings
 	fmt.Printf("[checker] config dir: %s\n", summary.ConfigDir)
 	files := strings.Join(summary.Files, ", ")
 	if files == "" {
@@ -94,6 +117,8 @@ func runDryRun(opts checkOptions) int {
 	}
 	fmt.Printf("[checker] có zcodejwttoken: %s\n", hasJwt)
 	fmt.Printf("[checker] API: %s, locale: %s, app-version: %s, interval: %ds\n", checker.DefaultMarketingBase, opts.locale, opts.appVersion, int(opts.interval.Seconds()))
+	fmt.Printf("[checker] Check account: %s\n", opts.account)
+	fmt.Printf("[checker] Khung giờ check: %s-%s giờ VN (window=%v, --no-window=%v)\n", opts.from, opts.to, settings.CheckWindowEnabled, opts.noWindow)
 	fmt.Println("[checker] Chế độ: GET marketing/touch để báo deal. Claim chỉ chạy khi bạn bấm")
 	fmt.Println("[checker] \"Nhận deal\" trên popup hoặc gõ y ở lệnh claim — không auto-claim, không report gì khi chỉ xem.")
 	return 0
@@ -159,11 +184,40 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 	} else {
 		fmt.Println("[checker] Đã có token từ config (không hiện token ra đây).")
 	}
+	// Tài khoản gọi API check: --account (CLI) > settings.check_account
+	// (menu tray chỉnh) > mặc định là tài khoản đang login ZCode.
+	checkToken, checkLabel := checkTokenFor(opts.account, token)
+	if checkLabel != "" {
+		fmt.Printf("[checker] Check deal bằng tài khoản: %s\n", checkLabel)
+	}
 	seq := 0
 	failures := 0
 	seen := checker.LoadSeen()
+	settings := checker.LoadDealSettings() // đọc lại để lấy check_window_enabled (menu tray chỉnh live)
+	windowOn := settings.CheckWindowEnabled && !opts.noWindow
+	window := checker.DealSettings{CheckFrom: opts.from, CheckTo: opts.to}
+	// --once là hành động chủ động của người dùng → bỏ qua khung giờ.
+	checkNowPending := opts.once
+	outsideLogged := false
+	wait := time.Duration(0)
 	for {
-		deals, err := checker.QueryDeals(token, deviceMid, opts.locale, opts.appVersion, seq)
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		wait = opts.interval
+		if windowOn && !checkNowPending {
+			if _, minutes := vnNow(); !window.InCheckWindow(minutes) {
+				if !outsideLogged {
+					fmt.Printf("[checker] Ngoài khung giờ check (%s-%s giờ VN) — KHÔNG gọi API, đợi 60s mỗi vòng.\n", opts.from, opts.to)
+					outsideLogged = true
+				}
+				wait = 60 * time.Second
+				continue
+			}
+			outsideLogged = false
+		}
+		checkNowPending = false
+		deals, err := checker.QueryDeals(checkToken, deviceMid, opts.locale, opts.appVersion, seq)
 		if err != nil {
 			failures++
 			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
@@ -174,7 +228,7 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 			if opts.once {
 				return 1
 			}
-			time.Sleep(delay)
+			wait = delay
 			continue
 		}
 		seq++
@@ -196,14 +250,14 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 			}
 			checker.SaveSeen(seen)
 			Notify("ZCode - Có deal mới!", formatDealsMessage(fresh))
-			if opts.noPopup {
+			if !opts.noPopup {
+				// Popup nhận deal (Windows): người dùng bấm "Nhận deal"
+				// tool mới claim. --once block chờ chọn xong rồi thoát.
+				offerDealClaim(fresh, newClaimContext(checkToken, deviceMid), opts.once)
+			} else {
 				// Không hiện popup: vẫn lưu deal nhận được để
 				// `zcode-deal claim` dùng được từ terminal.
 				recordPendingClaim(fresh)
-			} else {
-				// Popup nhận deal (Windows): người dùng bấm "Nhận deal"
-				// tool mới claim. --once block chờ chọn xong rồi thoát.
-				offerDealClaim(fresh, newClaimContext(token, deviceMid), opts.once)
 			}
 			if opts.autoOpen {
 				fmt.Println(OpenZcode())
@@ -212,8 +266,26 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 		if opts.once {
 			return 0
 		}
-		time.Sleep(opts.interval)
 	}
+}
+
+// checkTokenFor trả token dùng gọi API check deal: --account (CLI) >
+// settings.check_account (menu tray chỉnh) > token mặc định đang login
+// ZCode. Trả thêm nhãn tài khoản khi dùng tài khoản cockpit.
+func checkTokenFor(accountSetting, defaultToken string) (string, string) {
+	if accountSetting == "" || strings.EqualFold(accountSetting, "default") {
+		return defaultToken, ""
+	}
+	for _, acc := range checker.ListCockpitZcodeAccounts() {
+		if strings.EqualFold(acc.Email, accountSetting) || strings.EqualFold(acc.ID, accountSetting) {
+			if acc.JWT == "" {
+				break
+			}
+			return acc.JWT, acc.Email
+		}
+	}
+	logLine(fmt.Sprintf("[checker] Không tìm thấy/JWT rỗng cho tài khoản check %q — dùng tài khoản mặc định.", accountSetting))
+	return defaultToken, ""
 }
 
 func minInt(a, b int) int {

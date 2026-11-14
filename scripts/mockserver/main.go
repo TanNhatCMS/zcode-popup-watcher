@@ -135,6 +135,17 @@ func main() {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(heroPNG)
 	})
+	mux.HandleFunc("/api/oauth/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("GET oauth/userinfo auth=%v", r.Header.Get("Authorization") != "")
+		// Giống response OIDC userinfo của app gốc: user ở root hoặc
+		// trong data — tool chấp nhận cả hai.
+		writeJSON(w, map[string]any{
+			"sub":                "mock-user-1",
+			"name":               "TanNhat (mock)",
+			"preferred_username": "tannhat",
+			"email":              "tannhat@mock.local",
+		})
+	})
 	mux.HandleFunc("/api/v1/marketing/touch/action", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		log.Printf("POST touch/action body=%s auth=%v", body, r.Header.Get("Authorization") != "")

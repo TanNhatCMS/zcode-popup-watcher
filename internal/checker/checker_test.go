@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -197,6 +199,117 @@ func TestParseSnapshotHeroAndFormattedDesc(t *testing.T) {
 		// Banner không có title riêng (chỉ success_popup); payload này
 		// không khai báo success_popup nên title rỗng là đúng.
 		t.Fatalf("banner title phải rỗng, got %q", banner.Title)
+	}
+}
+
+func TestParseAccountUser(t *testing.T) {
+	// Dạng 1: user ở root (OIDC userinfo của Z.ai global).
+	info, err := parseAccountUser(map[string]any{
+		"sub":                "u1",
+		"name":               "TanNhat",
+		"preferred_username": "tannhat",
+		"email":              "tannhat@example.com",
+	})
+	if err != nil {
+		t.Fatalf("parse root user: %v", err)
+	}
+	if info.Username != "TanNhat" || info.Email != "tannhat@example.com" || info.ID != "u1" {
+		t.Fatalf("root user sai: %+v", info)
+	}
+	// Dạng 2: user trong data (profile của Z.ai CN, id thay bằng user_id).
+	info2, err := parseAccountUser(map[string]any{
+		"code": 0,
+		"data": map[string]any{"user_id": "x9", "name": "CN user"},
+	})
+	if err != nil {
+		t.Fatalf("parse data user: %v", err)
+	}
+	if info2.ID != "x9" || info2.Username != "CN user" {
+		t.Fatalf("data user sai: %+v", info2)
+	}
+	// Không có thông tin user → lỗi.
+	if _, err := parseAccountUser(map[string]any{"code": 0}); err == nil {
+		t.Fatal("payload không có user phải trả lỗi")
+	}
+}
+
+func TestDealSettingsWindow(t *testing.T) {
+	s := DealSettings{CheckFrom: "17:55", CheckTo: "22:10"}
+	if !s.InCheckWindow(18 * 60) {
+		t.Fatal("18:00 phải trong khung 17:55-22:10")
+	}
+	if s.InCheckWindow(10 * 60) {
+		t.Fatal("10:00 phải ngoài khung")
+	}
+	if s.InCheckWindow(17*60 + 54) {
+		t.Fatal("17:54 ngoài khung")
+	}
+	// Khung qua nửa đêm: 22:00-02:00 → 23:00 và 01:00 trong, 10:00 ngoài.
+	night := DealSettings{CheckFrom: "22:00", CheckTo: "02:00"}
+	if !night.InCheckWindow(23*60) || !night.InCheckWindow(60) {
+		t.Fatal("khung qua nửa đêm sai")
+	}
+	if night.InCheckWindow(10 * 60) {
+		t.Fatal("10:00 ngoài khung đêm")
+	}
+	// Cấu hình sai → fail-open (luôn trong khung).
+	broken := DealSettings{CheckFrom: "abc", CheckTo: "22:10"}
+	if !broken.InCheckWindow(10 * 60) {
+		t.Fatal("cấu hình sai phải fail-open")
+	}
+}
+
+func TestDealSettingsLoadSave(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ZCODE_DATA_BASE_DIR", dir)
+	// StateDir dùng UserHomeDir, ZCODE_DATA_BASE_DIR chỉ ảnh hưởng
+	// ConfigDir — nên ghi file trực tiếp vào StateDir thật là không ổn
+	// cho unit test. Thay vào đó kiểm tra default + round-trip JSON.
+	saved := []byte(`{"check_account":"zcode-27-10@tannhatcms.io.vn","check_window_enabled":false,"check_from":"18:00","check_to":"23:00"}`)
+	var loaded DealSettings
+	if err := json.Unmarshal(saved, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.CheckAccount != "zcode-27-10@tannhatcms.io.vn" || loaded.CheckWindowEnabled || loaded.CheckFrom != "18:00" {
+		t.Fatalf("parse settings sai: %+v", loaded)
+	}
+	def := DefaultDealSettings()
+	if def.CheckAccount != "default" || !def.CheckWindowEnabled || def.CheckFrom != "17:55" {
+		t.Fatalf("default sai: %+v", def)
+	}
+}
+
+func TestCockpitParse(t *testing.T) {
+	dir := t.TempDir()
+	index := []byte(`{"version":"1","current_account_id":"acc-1","accounts":[
+		{"id":"acc-1","email":"a@example.com","plan_type":"GLM Start"},
+		{"id":"acc-2","email":"b@example.com"}
+	]}`)
+	if err := os.MkdirAll(filepath.Join(dir, "zcode_accounts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zcode_accounts.json"), index, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAcc := func(id, jwt string) {
+		t.Helper()
+		body := []byte(`{"id":"` + id + `","email":"` + id + `@example.com","display_name":"Người ` + id + `","plan_type":"GLM Start","zcode_jwt_token":"` + jwt + `"}`)
+		if err := os.WriteFile(filepath.Join(dir, "zcode_accounts", id+".json"), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAcc("acc-1", "jwt-a")
+	writeAcc("acc-2", "") // không có JWT — phải bị bỏ qua
+
+	t.Setenv("COCKPIT_TOOLS_DATA_DIR", dir)
+	t.Setenv("COCKPIT_TOOLS_PROFILE", "")
+	accounts := ListCockpitZcodeAccounts()
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1 (acc-2 không JWT bị bỏ qua)", len(accounts))
+	}
+	acc := accounts[0]
+	if acc.ID != "acc-1" || acc.Email != "a@example.com" || acc.JWT != "jwt-a" || acc.DisplayName != "Người acc-1" {
+		t.Fatalf("account parse sai: %+v", acc)
 	}
 }
 
