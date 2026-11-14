@@ -180,22 +180,107 @@ func ReadZcodeJWT(configDir string) (string, bool) {
 // Deal là 1 delivery đã loc (mỗi vị trí chỉ lấy 1 cài đầu tiên).
 // PlanID/ButtonLabel/ClaimURL có giá trị khi deal có nút nhận được
 // (action "claim_zcode_plan" / "open_url" trong payload app gốc).
+// Desc là mô tả đã chuyển sang text thuần (format html/markdown được
+// strip như app gốc — xem text.go). Hero là ảnh quảng cáo (marketing
+// asset, app gốc download + verify SHA-256 trước khi vẽ).
 type Deal struct {
 	Key         string
 	CampaignID  string
 	Position    string
 	Priority    any
 	Title       string
-	Detail      string
+	Detail      string // dòng tóm tắt cho toast/log (desc + nhãn nút)
+	Desc        string // mô tả đầy đủ dạng text thuần cho popup
 	PlanID      string // action claim_zcode_plan → plan nhận được
 	ButtonLabel string // nhãn nút nhận, ví dụ "Nhận ngay"
 	ClaimURL    string // action open_url → link mở (nếu không phải claim)
+	HeroSrc     string // URL ảnh banner/hero
+	HeroSHA256  string // sha256 của ảnh (verify fail-closed như app)
+	ZcodePlan   *ZcodePlanHeroArgs // args.zcode_plan — dữ liệu vé (số token, hạn)
 }
 
 // Claimable trả về true nếu deal có nút nhận tool có thể thay bấm
 // (claim qua API billing/claim) hoặc mở link claim.
 func (d Deal) Claimable() bool {
 	return d.PlanID != "" || d.ClaimURL != ""
+}
+
+// heroAsset đọc visual marketing kiểu image: {type:"image",
+// image:{default:{src, sha256}}}, trả về (src, sha256) hoặc rỗng.
+func heroAsset(visual any) (string, string) {
+	m, ok := visual.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	if visualType, _ := m["type"].(string); visualType != "image" {
+		return "", "" // video/bundle: popup native không vẽ được, bỏ qua
+	}
+	image, ok := m["image"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	def, ok := image["default"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	src, _ := def["src"].(string)
+	sha, _ := def["sha256"].(string)
+	return strings.TrimSpace(src), strings.TrimSpace(sha)
+}
+
+// zcodePlanArgs đọc args.zcode_plan từ visual — dữ liệu tấm vé sau khi
+// nhận (heroData() trong marketingResources.ts của app gốc): plan name,
+// ends_at (epoch giây), entitlements (meter "model_usage" là quota
+// chính). Trả nil nếu visual không khai báo.
+func zcodePlanArgs(visual any) *ZcodePlanHeroArgs {
+	m, ok := visual.(map[string]any)
+	if !ok {
+		return nil
+	}
+	args, ok := m["args"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := args["zcode_plan"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	plan := &ZcodePlanHeroArgs{}
+	if v, ok := raw["name"].(string); ok {
+		plan.Name = strings.TrimSpace(v)
+	}
+	if v, ok := raw["ends_at"].(float64); ok && v >= 0 {
+		plan.EndsAt = int64(v)
+	}
+	if ents, ok := raw["entitlements"].([]any); ok {
+		for _, e := range ents {
+			em, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			ent := ClaimEntitlement{}
+			if v, ok := em["meter"].(string); ok {
+				ent.Meter = strings.TrimSpace(v)
+			}
+			if v, ok := em["show_name"].(string); ok {
+				ent.ShowName = strings.TrimSpace(v)
+			}
+			if v, ok := em["unit_type"].(string); ok {
+				ent.UnitType = strings.TrimSpace(v)
+			}
+			if v, ok := em["grant_units"].(float64); ok {
+				ent.GrantUnits = v
+			}
+			if ent.ShowName == "" && ent.GrantUnits == 0 {
+				continue
+			}
+			plan.Entitlements = append(plan.Entitlements, ent)
+		}
+	}
+	if plan.Name == "" && len(plan.Entitlements) == 0 {
+		return nil
+	}
+	return plan
 }
 
 func textContent(node any) string {
@@ -307,7 +392,8 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			continue
 		}
 		seenPositions[position] = true
-		var title, detail, planID, buttonLabel, claimURL string
+		var title, detail, desc, planID, buttonLabel, claimURL, heroSrc, heroSHA string
+		var zplan *ZcodePlanHeroArgs
 		if position == "banner" {
 			banner, _ := delivery["banner"].(map[string]any)
 			// App gốc clickBanner: nút action != "close" đầu tiên là nút chính.
@@ -323,9 +409,16 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 				}
 				break
 			}
+			// Banner không có title/description riêng; nội dung hiển thị
+			// nằm ở success_popup (app chỉ hiện banner khi bấm xong).
 			if sp, ok := banner["success_popup"].(map[string]any); ok {
-				title = textContent(sp["title"])
+				tFormat, tContent := formattedText(sp["title"])
+				title = plainText(tFormat, tContent)
+				dFormat, dContent := formattedText(sp["description"])
+				desc = plainText(dFormat, dContent)
+				zplan = zcodePlanArgs(sp["hero"])
 			}
+			heroSrc, heroSHA = heroAsset(banner["background"])
 			labels := []string{}
 			for _, button := range parseButtons(banner["buttons"]) {
 				if label := buttonText(button); label != "" {
@@ -338,8 +431,12 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			}
 		} else {
 			popup, _ := delivery["popup"].(map[string]any)
-			title = textContent(popup["title"])
-			desc := textContent(popup["description"])
+			tFormat, tContent := formattedText(popup["title"])
+			title = plainText(tFormat, tContent)
+			dFormat, dContent := formattedText(popup["description"])
+			desc = plainText(dFormat, dContent)
+			heroSrc, heroSHA = heroAsset(popup["hero"])
+			zplan = zcodePlanArgs(popup["hero"])
 			labels := []string{}
 			for _, button := range parseButtons(popup["buttons"]) {
 				if label := buttonText(button); label != "" {
@@ -370,9 +467,13 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			Priority:    delivery["priority"],
 			Title:       title,
 			Detail:      detail,
+			Desc:        desc,
 			PlanID:      planID,
 			ButtonLabel: buttonLabel,
 			ClaimURL:    claimURL,
+			HeroSrc:     heroSrc,
+			HeroSHA256:  heroSHA,
+			ZcodePlan:   zplan,
 		})
 	}
 	return results, nil

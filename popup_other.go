@@ -7,7 +7,7 @@ package main
 // người dùng nhận bằng lệnh `zcode-deal claim`; báo bằng toast hệ thống.
 
 // showDealPopup trả "none" — caller hiểu là không có popup, không chặn.
-func showDealPopup(title, detail, buttonLabel string) string {
+func showDealPopup(info popupDealInfo) string {
 	return "none"
 }
 

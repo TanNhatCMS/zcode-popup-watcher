@@ -26,7 +26,8 @@ Lệnh:
   check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--no-popup] [--dry-run] [--self-test]
       Kiểm tra deal qua API marketing/touch. Mặc định poll liên tục
       mỗi 600 giây; --once chỉ kiểm tra 1 lần rồi thoát.
-      Có deal có thể nhận: hiện popup (Windows) — bấm "Nhận deal" tool
+      Có deal có thể nhận: hiện popup vẽ giống app ZCode (ảnh banner,
+      mô tả đầy đủ, quyền lợi thật của plan) — bấm "Nhận deal" tool
       mới claim giúp bạn, không bấm thì không claim gì cả.
   watch [tùy chọn như check]
       Giống check (poll liên tục).

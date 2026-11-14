@@ -23,7 +23,11 @@ rất dễ bị 429, thu hồi quota hoặc khóa tài khoản.
    `Authorization: Bearer <jwt>` nếu có token. Mặc định 600 giây/lần,
    đúng nhịp poll của app gốc. Dưới 300 giây dễ bị 429.
 4. Có delivery mới (banner/popup, mỗi vị trí chỉ lấy 1 cái đầu tiên,
-   giống app gốc) thì báo + hiện popup nếu deal có nút nhận:
+   giống app gốc) thì báo + hiện popup nếu deal có nút nhận, vẽ giống
+   bố cục `CloudContentDialog` của app: **ảnh banner (download + verify
+   SHA-256 như asset gate của app) → title → mô tả đầy đủ** (format
+   html/markdown được strip giống `marketingLabel`) → **quyền lợi thật
+   của plan** từ `GET /api/v1/zcode-plan/billing/preview` → nút bấm:
    - Nút `claim_zcode_plan` → popup "Nhận deal" → claim thật qua
      `POST /api/v1/zcode-plan/billing/claim` với body `{plan_id}` và
      header `X-ZCode-App-Version`, `X-Platform` (`win32-x64`,…) —
@@ -90,10 +94,11 @@ cho `$HOME`), `ZCODE_JWT_TOKEN` (ghi đè token, ưu tiên hơn
 
 - **Windows:** `zcode-deal tray` mở app tray thật (icon chuông vàng +
   menu native): Mở ZCode / Kiểm tra ngay / Mở log / Thoát. Có deal mới
-  có thể nhận: **popup nổi trên cùng hiện ra** với nút
-  "Nhận deal" / "Mở ZCode" / "Để sau" — bấm "Nhận deal" tool mới claim
-  và hiện kết quả; toast + icon đổi chấm đỏ vẫn như trước. Chạy
-  `zcode-deal.exe` không tham số cũng mở tray luôn.
+  có thể nhận: **popup nổi trên cùng hiện ra vẽ giống app ZCode** —
+  ảnh banner, mô tả đầy đủ, quyền lợi thật của plan ("Bạn nhận
+  được: …"), nút "Nhận deal" / "Mở ZCode" / "Để sau" — bấm "Nhận deal"
+  tool mới claim và hiện kết quả; toast + icon đổi chấm đỏ vẫn như
+  trước. Chạy `zcode-deal.exe` không tham số cũng mở tray luôn.
 - **Linux/macOS:** chưa có menu tray gốc (cần GTK/AppIndicator riêng).
   `zcode-deal tray` tách daemon chạy nền, lệnh thoát ngay, tắt được
   terminal; daemon báo bằng thông báo hệ thống, thoát bằng
@@ -120,13 +125,14 @@ và ngược lại.
 
 ## Test với server mẫu cục bộ
 
-Không cần chạm API thật khi test luồng claim:
+Không cần chạm API thật khi test luồng claim (mockserver tự vẽ sẵn ảnh
+banner PNG + description dạng HTML có `<script>` để kiểm tra strip):
 
 ```sh
 go run ./scripts/mockserver -addr 127.0.0.1:8931 &
 ZCODE_MARKETING_URL=http://127.0.0.1:8931 \
 ZCODE_JWT_TOKEN=mock-token \
-zcode-deal check --once          # popup hiện ra với deal mock
+zcode-deal check --once          # popup hiện ra: ảnh + mô tả + quyền lợi
 zcode-deal claim                 # nhận deal mock, xem kết quả
 ```
 

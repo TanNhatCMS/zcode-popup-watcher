@@ -222,13 +222,28 @@ func PreviewClaimPlans(token, appVersion string) ([]ClaimPlanPreview, error) {
 	return plans, nil
 }
 
-// ClaimResult là kết quả 1 lần claim plan.
+// ClaimResult là kết quả 1 lần claim plan. EndsAt là hạn dùng của
+// plan (epoch GIÂY — app gốc convert `ends_at * 1000` sang ms khi hiển
+// thị "Valid until").
 type ClaimResult struct {
 	Success bool
 	Code    int
 	Message string
 	PlanID  string
+	EndsAt  int64
 	Plan    ClaimPlanPreview
+}
+
+// FindPlanPreview match plan theo planID trong danh sách preview để
+// popup hiển thị entitlement thật của deal (giống app gốc hiện chi
+// tiết plan trong luồng nhận). Trả nil nếu không thấy.
+func FindPlanPreview(plans []ClaimPlanPreview, planID string) *ClaimPlanPreview {
+	for i := range plans {
+		if plans[i].PlanID == planID {
+			return &plans[i]
+		}
+	}
+	return nil
 }
 
 // ClaimPlan gọi POST /api/v1/zcode-plan/billing/claim với body
@@ -266,6 +281,7 @@ func ClaimPlan(token, planID, appVersion string) (ClaimResult, error) {
 				Name         string  `json:"name"`
 				Description  string  `json:"description"`
 				Priority     float64 `json:"priority"`
+				EndsAt       float64 `json:"ends_at"`
 				Entitlements []struct {
 					EntitlementID string  `json:"entitlement_id"`
 					ShowName      string  `json:"show_name"`
@@ -296,6 +312,9 @@ func ClaimPlan(token, planID, appVersion string) (ClaimResult, error) {
 		Name:        strings.TrimSpace(payload.Data.Plan.Name),
 		Description: strings.TrimSpace(payload.Data.Plan.Description),
 		Priority:    payload.Data.Plan.Priority,
+	}
+	if payload.Data.Plan.EndsAt >= 0 {
+		result.EndsAt = int64(payload.Data.Plan.EndsAt)
 	}
 	for _, ent := range payload.Data.Plan.Entitlements {
 		id := strings.TrimSpace(ent.EntitlementID)

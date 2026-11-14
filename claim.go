@@ -15,11 +15,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/TanNhatCMS/zcode-popup-watcher/internal/checker"
 )
@@ -90,6 +92,95 @@ func recordPendingClaim(fresh []checker.Deal) {
 		deal.Key, deal.PlanID))
 }
 
+// popupDealInfo là toàn bộ chi tiết popup cần vẽ khi CÓ deal (bố cục
+// như banner tối màu của app: header plan → title → số token lớn → mô
+// tả → entitlements → nút bấm). HeroPNG nil → popup text-only.
+type popupDealInfo struct {
+	Title       string
+	Desc        string
+	PlanName    string             // nhãn header kiểu "ZCODE GLOBAL BUILD"
+	Quota       *checker.PlanQuota // số token lớn (nếu đọc được)
+	ButtonLabel string
+	Entitlements []string
+	HeroPNG     []byte
+}
+
+// ticketInfo là dữ liệu popup vé SAU KHI nhận deal thành công (bố cục
+// như dialog kết quả của app: tấm vé trắng + hạn dùng đến + Đã hiểu/
+// Chia sẻ).
+type ticketInfo struct {
+	PlanName  string
+	Quota     *checker.PlanQuota
+	EndsAt    int64  // epoch giây
+	ShareText string // nội dung chép vào clipboard khi bấm Chia sẻ
+}
+
+// buildPopupDealInfo gom chi tiết deal cho popup: tải ảnh hero (verify
+// SHA-256) + dữ liệu vé từ args.zcode_plan (giống heroData() của app)
+// + entitlements thật từ billing/preview. Mọi phần lỗi đều fail-soft.
+func buildPopupDealInfo(deal checker.Deal, ctx claimContext) popupDealInfo {
+	info := popupDealInfo{
+		Title:       deal.Title,
+		Desc:        deal.Desc,
+		ButtonLabel: deal.ButtonLabel,
+	}
+	// Dữ liệu vé khai báo ngay trong payload (args.zcode_plan) — ưu
+	// tiên nguồn này vì là thứ app gốc dùng để vẽ vé.
+	if deal.ZcodePlan != nil {
+		info.PlanName = deal.ZcodePlan.Name
+		info.Quota = checker.QuotaFromEntitlements(deal.ZcodePlan.Entitlements)
+	}
+	if deal.HeroSrc != "" {
+		if data, err := checker.FetchMarketingAsset(deal.HeroSrc, deal.HeroSHA256); err == nil {
+			info.HeroPNG = data
+		} else {
+			logLine(fmt.Sprintf("[claim] Bỏ qua ảnh deal (tải/verify SHA-256 lỗi): %v", err))
+		}
+	}
+	if ctx.token != "" && deal.PlanID != "" {
+		if plans, err := checker.PreviewClaimPlans(ctx.token, ctx.appVersion); err == nil {
+			if plan := checker.FindPlanPreview(plans, deal.PlanID); plan != nil {
+				if info.Quota == nil {
+					info.Quota = checker.QuotaFromEntitlements(plan.Entitlements)
+				}
+				info.Entitlements = entitlementLines(*plan)
+				if info.PlanName == "" {
+					info.PlanName = plan.Name
+				}
+				if info.Title == "" {
+					info.Title = plan.Name
+				}
+				if info.Desc == "" {
+					info.Desc = plan.Description
+				}
+			}
+		} else {
+			logLine(fmt.Sprintf("[claim] Bỏ qua chi tiết plan (preview lỗi): %v", err))
+		}
+	}
+	if info.Title == "" {
+		info.Title = "Có deal mới có thể nhận!"
+	}
+	return info
+}
+
+// entitlementLines render danh sách quyền lợi thành các dòng gọn
+// "· 300M token GLM-5.3-Flash (300 M day)".
+func entitlementLines(plan checker.ClaimPlanPreview) []string {
+	var lines []string
+	for _, ent := range plan.Entitlements {
+		if ent.ShowName == "" {
+			continue
+		}
+		line := "· " + ent.ShowName
+		if ent.GrantUnits > 0 {
+			line += fmt.Sprintf(" (%s %s %s)", formatUnits(ent.GrantUnits), ent.UnitType, ent.Period)
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
 // offerDealClaim xử lý các deal mới: lưu pending-claim, hiện popup
 // (Windows) và claim khi người dùng bấm. wait=true chỉ dùng cho
 // `check --once` để tiến trình không thoát trước khi popup đóng.
@@ -101,12 +192,13 @@ func offerDealClaim(fresh []checker.Deal, ctx claimContext, wait bool) {
 	recordPendingClaim(fresh)
 
 	handle := func() {
-		choice := showDealPopup(popupTitle(*deal), popupDetail(*deal), deal.ButtonLabel)
+		info := buildPopupDealInfo(*deal, ctx)
+		choice := showDealPopup(info)
 		switch choice {
 		case "claim":
-			summary, ok := claimDeal(*deal, ctx)
+			summary, ok, result := claimDeal(*deal, ctx)
 			if ok {
-				alertBox("ZCode Deal - Nhận thành công!", summary, false)
+				showClaimSuccessUI(*deal, ctx, result, summary)
 			} else {
 				alertBox("ZCode Deal - Chưa nhận được", summary, true)
 			}
@@ -127,50 +219,32 @@ func offerDealClaim(fresh []checker.Deal, ctx claimContext, wait bool) {
 	go handle()
 }
 
-func popupTitle(deal checker.Deal) string {
-	if strings.TrimSpace(deal.Title) != "" {
-		return deal.Title
-	}
-	return "Có deal mới có thể nhận!"
-}
-
-func popupDetail(deal checker.Deal) string {
-	lines := []string{}
-	if detail := strings.TrimSpace(deal.Detail); detail != "" {
-		lines = append(lines, detail)
-	}
-	if deal.PlanID != "" {
-		lines = append(lines, fmt.Sprintf("(plan: %s)", deal.PlanID))
-	}
-	lines = append(lines, "", "Bấm \"Nhận deal\" để nhận ngay. Tool chỉ claim khi bạn bấm.")
-	return strings.Join(lines, "\n")
-}
-
 // claimDeal thực hiện 1 lần claim theo hành động của người dùng; trả
-// về (tóm tắt kết quả, thành công hay không). Caller chịu trách nhiệm
-// hiển thị: popup dùng alertBox, CLI in console — claimDeal không tự
-// mở MessageBox để không chặn tiến trình chạy không đầu cuối.
-func claimDeal(deal checker.Deal, ctx claimContext) (string, bool) {
+// về (tóm tắt kết quả, thành công hay không, kết quả raw từ server).
+// Caller chịu trách nhiệm hiển thị: popup dùng vé thành công, CLI in
+// console — claimDeal không tự mở MessageBox để không chặn tiến trình
+// chạy không đầu cuối.
+func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.ClaimResult) {
 	if ctx.token == "" {
 		logLine("[claim] Không claim được: chưa có token đăng nhập.")
-		return "Chưa có token đăng nhập trong ~/.zcode/v2.\nMở ZCode, đăng nhập rồi chạy lại tool.", false
+		return "Chưa có token đăng nhập trong ~/.zcode/v2.\nMở ZCode, đăng nhập rồi chạy lại tool.", false, checker.ClaimResult{}
 	}
 	// Deal dạng link (open_url): mở link thay vì gọi API.
 	if deal.PlanID == "" && deal.ClaimURL != "" {
 		logLine("[claim] Deal là link nhận: " + deal.ClaimURL)
 		if err := openURL(deal.ClaimURL); err != nil {
 			logLine(fmt.Sprintf("[claim] Không mở được link: %v", err))
-			return fmt.Sprintf("Không mở được link nhận deal: %v", err), false
+			return fmt.Sprintf("Không mở được link nhận deal: %v", err), false, checker.ClaimResult{}
 		}
 		reportActionSafe(ctx, deal.CampaignID, "confirm")
 		logLine("[claim] Đã mở link nhận deal.")
-		return "Đã mở link nhận deal:\n" + deal.ClaimURL, true
+		return "Đã mở link nhận deal:\n" + deal.ClaimURL, true, checker.ClaimResult{}
 	}
 	logLine(fmt.Sprintf("[claim] Đang nhận deal %s (plan %s) theo lệnh của bạn...", deal.Key, deal.PlanID))
 	result, err := checker.ClaimPlan(ctx.token, deal.PlanID, ctx.appVersion)
 	if err != nil {
 		logLine(fmt.Sprintf("[claim] LỖI claim: %v", err))
-		return fmt.Sprintf("Không nhận được deal: %v", err), false
+		return fmt.Sprintf("Không nhận được deal: %v", err), false, result
 	}
 	if !result.Success {
 		message := result.Message
@@ -178,14 +252,63 @@ func claimDeal(deal checker.Deal, ctx claimContext) (string, bool) {
 			message = fmt.Sprintf("Server từ chối yêu cầu nhận (code %d).", result.Code)
 		}
 		logLine(fmt.Sprintf("[claim] Server từ chối (code %d): %s", result.Code, message))
-		return message, false
+		return message, false, result
 	}
 	// Claim thành công — giống app gốc: report confirm sau khi nhận.
 	checker.ClearPendingClaim()
 	reportActionSafe(ctx, deal.CampaignID, "confirm")
 	summary := planSummary(result)
 	logLine("[claim] Nhận deal THÀNH CÔNG: " + strings.ReplaceAll(summary, "\n", " | "))
-	return summary, true
+	return summary, true, result
+}
+
+// showClaimSuccessUI hiện popup vé "nhận thành công" (Windows, ảnh 2
+// của app) từ dữ liệu claim: quota từ args.zcode_plan của deal (ưu
+// tiên) hoặc billing/preview, ends_at từ response claim. Non-Windows
+// chỉ log (đã in trong claimDeal).
+func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.ClaimResult, summary string) {
+	info := ticketInfo{
+		PlanName:  result.Plan.Name,
+		ShareText: summary,
+		EndsAt:    result.EndsAt,
+	}
+	if info.PlanName == "" && deal.ZcodePlan != nil {
+		info.PlanName = deal.ZcodePlan.Name
+	}
+	if deal.ZcodePlan != nil && info.Quota == nil {
+		info.Quota = checker.QuotaFromEntitlements(deal.ZcodePlan.Entitlements)
+		if info.EndsAt == 0 {
+			info.EndsAt = deal.ZcodePlan.EndsAt
+		}
+	}
+	if ctx.token != "" && info.Quota == nil {
+		if plans, err := checker.PreviewClaimPlans(ctx.token, ctx.appVersion); err == nil {
+			if plan := checker.FindPlanPreview(plans, result.PlanID); plan != nil {
+				info.Quota = checker.QuotaFromEntitlements(plan.Entitlements)
+			}
+		}
+	}
+	if info.Quota == nil && len(result.Plan.Entitlements) > 0 {
+		info.Quota = checker.QuotaFromEntitlements(result.Plan.Entitlements)
+	}
+	choice := showClaimSuccessPopup(info)
+	if choice == "share" {
+		if err := copyToClipboard(info.ShareText); err == nil {
+			logLine("[claim] Đã chép nội dung vé vào clipboard.")
+		} else {
+			logLine(fmt.Sprintf("[claim] Không chép được clipboard: %v", err))
+		}
+	}
+}
+
+// copyToClipboard chép text vào clipboard Windows bằng PowerShell
+// (Set-Clipboard). Text đi qua base64 để tránh mọi vấn đề escaping
+// dấu nháy khi nhúng vào dòng lệnh.
+func copyToClipboard(text string) error {
+	b64 := base64.StdEncoding.EncodeToString([]byte(text))
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		fmt.Sprintf("Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')))", b64))
+	return cmd.Run()
 }
 
 func planSummary(result checker.ClaimResult) string {
@@ -193,18 +316,7 @@ func planSummary(result checker.ClaimResult) string {
 	if name == "" {
 		name = result.PlanID
 	}
-	var lines []string
-	lines = append(lines, name)
-	for _, ent := range result.Plan.Entitlements {
-		if ent.ShowName == "" {
-			continue
-		}
-		line := "- " + ent.ShowName
-		if ent.GrantUnits > 0 {
-			line += fmt.Sprintf(" (%s %s %s)", formatUnits(ent.GrantUnits), ent.UnitType, ent.Period)
-		}
-		lines = append(lines, line)
-	}
+	lines := append([]string{name}, entitlementLines(result.Plan)...)
 	if len(lines) == 1 && result.Plan.Description != "" {
 		lines = append(lines, result.Plan.Description)
 	}
@@ -264,6 +376,19 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 	}
 	fmt.Printf("[claim] Deal đang chờ: [%s] %s\n", pending.Position, pending.Title)
 	fmt.Printf("[claim] Chi tiết: %s\n", pending.Detail)
+	// In thêm quyền lợi thật của plan (giữ nguyên nếu preview lỗi).
+	if ctx.token != "" && pending.PlanID != "" {
+		if plans, err := checker.PreviewClaimPlans(ctx.token, ctx.appVersion); err == nil {
+			if plan := checker.FindPlanPreview(plans, pending.PlanID); plan != nil {
+				if plan.Name != "" {
+					fmt.Printf("[claim] Plan: %s\n", plan.Name)
+				}
+				for _, line := range entitlementLines(*plan) {
+					fmt.Printf("[claim]   %s\n", line)
+				}
+			}
+		}
+	}
 	if pending.PlanID == "" && pending.ClaimURL == "" {
 		fmt.Println("[claim] Deal này không có nút nhận tool claim được — mở ZCode để nhận trong app.")
 		return 1
@@ -284,10 +409,13 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 		fmt.Println("[claim] Đã hủy. Deal vẫn giữ trong pending-claim.json, chạy lại `zcode-deal claim` khi muốn nhận.")
 		return 0
 	}
-	summary, ok := claimDeal(deal, ctx)
+	summary, ok, result := claimDeal(deal, ctx)
 	if ok {
 		fmt.Println("[claim] NHẬN THÀNH CÔNG:")
 		fmt.Println(summary)
+		if result.EndsAt > 0 {
+			fmt.Printf("[claim] Hạn dùng đến: %s\n", time.Unix(result.EndsAt, 0).Format("02/01/2006 15:04"))
+		}
 		return 0
 	}
 	fmt.Println("[claim] KHÔNG nhận được:")
