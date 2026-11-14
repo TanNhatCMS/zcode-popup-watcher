@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,8 +22,6 @@ import (
 	"strings"
 	"time"
 )
-
-var APIURL = "https://zcode.z.ai/api/v1/marketing/touch"
 
 const DefaultInterval = 600 * time.Second
 
@@ -179,13 +178,24 @@ func ReadZcodeJWT(configDir string) (string, bool) {
 }
 
 // Deal là 1 delivery đã loc (mỗi vị trí chỉ lấy 1 cài đầu tiên).
+// PlanID/ButtonLabel/ClaimURL có giá trị khi deal có nút nhận được
+// (action "claim_zcode_plan" / "open_url" trong payload app gốc).
 type Deal struct {
-	Key        string
-	CampaignID string
-	Position   string
-	Priority   any
-	Title      string
-	Detail     string
+	Key         string
+	CampaignID  string
+	Position    string
+	Priority    any
+	Title       string
+	Detail      string
+	PlanID      string // action claim_zcode_plan → plan nhận được
+	ButtonLabel string // nhãn nút nhận, ví dụ "Nhận ngay"
+	ClaimURL    string // action open_url → link mở (nếu không phải claim)
+}
+
+// Claimable trả về true nếu deal có nút nhận tool có thể thay bấm
+// (claim qua API billing/claim) hoặc mở link claim.
+func (d Deal) Claimable() bool {
+	return d.PlanID != "" || d.ClaimURL != ""
 }
 
 func textContent(node any) string {
@@ -197,20 +207,66 @@ func textContent(node any) string {
 	return ""
 }
 
-func buttonLabels(buttons any) []string {
+// parseButtons đọc mảng buttons của payload app gốc: mỗi nút có
+// {text: {format, content}, action: {type, args}} (marketingTouch.ts).
+func parseButtons(buttons any) []map[string]any {
 	list, ok := buttons.([]any)
 	if !ok {
 		return nil
 	}
-	var labels []string
+	var result []map[string]any
 	for _, b := range list {
 		if m, ok := b.(map[string]any); ok {
-			if label := textContent(m["text"]); label != "" {
-				labels = append(labels, label)
-			}
+			result = append(result, m)
 		}
 	}
-	return labels
+	return result
+}
+
+func buttonText(button map[string]any) string {
+	if text, ok := button["text"].(map[string]any); ok {
+		return textContent(text)
+	}
+	return ""
+}
+
+// buttonClaimArgs trả về (plan_id) nếu nút có action claim_zcode_plan.
+func buttonClaimPlanID(button map[string]any) string {
+	action, ok := button["action"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if actionType, _ := action["type"].(string); actionType != "claim_zcode_plan" {
+		return ""
+	}
+	args, ok := action["args"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	planID, _ := args["plan_id"].(string)
+	return strings.TrimSpace(planID)
+}
+
+// buttonURL trả về url nếu nút có action open_url (chỉ nhận http/https,
+// giống schema marketingTouch.ts của app gốc).
+func buttonURL(button map[string]any) string {
+	action, ok := button["action"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if actionType, _ := action["type"].(string); actionType != "open_url" {
+		return ""
+	}
+	args, ok := action["args"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	raw, _ := args["url"].(string)
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	return raw
 }
 
 // ParseSnapshot loc snapshot marketing/touch thành deal,
@@ -251,12 +307,30 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			continue
 		}
 		seenPositions[position] = true
-		var title, detail string
+		var title, detail, planID, buttonLabel, claimURL string
 		if position == "banner" {
 			banner, _ := delivery["banner"].(map[string]any)
-			labels := buttonLabels(banner["buttons"])
+			// App gốc clickBanner: nút action != "close" đầu tiên là nút chính.
+			for _, button := range parseButtons(banner["buttons"]) {
+				action, _ := button["action"].(map[string]any)
+				if actionType, _ := action["type"].(string); actionType == "close" {
+					continue
+				}
+				if id := buttonClaimPlanID(button); id != "" {
+					planID, buttonLabel = id, buttonText(button)
+				} else if link := buttonURL(button); link != "" {
+					claimURL, buttonLabel = link, buttonText(button)
+				}
+				break
+			}
 			if sp, ok := banner["success_popup"].(map[string]any); ok {
 				title = textContent(sp["title"])
+			}
+			labels := []string{}
+			for _, button := range parseButtons(banner["buttons"]) {
+				if label := buttonText(button); label != "" {
+					labels = append(labels, label)
+				}
 			}
 			detail = strings.Join(labels, " / ")
 			if detail == "" {
@@ -266,7 +340,20 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			popup, _ := delivery["popup"].(map[string]any)
 			title = textContent(popup["title"])
 			desc := textContent(popup["description"])
-			labels := buttonLabels(popup["buttons"])
+			labels := []string{}
+			for _, button := range parseButtons(popup["buttons"]) {
+				if label := buttonText(button); label != "" {
+					labels = append(labels, label)
+				}
+				// Nút claim ưu tiên hơn link: planID tìm thấy thì không
+				// ghi đè bằng open_url nữa.
+				if id := buttonClaimPlanID(button); id != "" && planID == "" {
+					planID, buttonLabel = id, buttonText(button)
+				} else if link := buttonURL(button); link != "" && claimURL == "" && planID == "" {
+					claimURL = link
+					buttonLabel = buttonText(button)
+				}
+			}
 			parts := []string{}
 			if desc != "" {
 				parts = append(parts, desc)
@@ -277,12 +364,15 @@ func ParseSnapshot(payload []byte) ([]Deal, error) {
 			detail = strings.Join(parts, " - ")
 		}
 		results = append(results, Deal{
-			Key:        position + ":" + campaignID,
-			CampaignID: campaignID,
-			Position:   position,
-			Priority:   delivery["priority"],
-			Title:      title,
-			Detail:     detail,
+			Key:         position + ":" + campaignID,
+			CampaignID:  campaignID,
+			Position:    position,
+			Priority:    delivery["priority"],
+			Title:       title,
+			Detail:      detail,
+			PlanID:      planID,
+			ButtonLabel: buttonLabel,
+			ClaimURL:    claimURL,
 		})
 	}
 	return results, nil
@@ -317,12 +407,9 @@ func SaveSeen(seen map[string]bool) {
 	}
 }
 
-// QueryDeals gọi GET marketing/touch, timeout 15s.
+// QueryDeals gọi GET marketing/touch, timeout 15s, giống app gốc.
 func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, error) {
-	if override := strings.TrimSpace(os.Getenv("ZCODE_MARKETING_URL")); override != "" {
-		APIURL = override
-	}
-	u := APIURL + "?seq=" + fmt.Sprintf("%d", seq)
+	u := marketingEndpoint("/api/v1/marketing/touch") + "?seq=" + fmt.Sprintf("%d", seq)
 	if _, err := url.Parse(u); err != nil {
 		return nil, err
 	}
@@ -336,8 +423,7 @@ func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, e
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := apiHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -345,19 +431,10 @@ func QueryDeals(token, deviceMid, locale, appVersion string, seq int) ([]Deal, e
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d từ marketing/touch", resp.StatusCode)
 	}
-	var body []byte
-	buf := make([]byte, 0, 64*1024)
-	tmp := make([]byte, 8192)
-	for {
-		n, err := resp.Body.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			break
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
-	body = buf
 	return ParseSnapshot(body)
 }
 
@@ -377,4 +454,65 @@ func WriteNotifyFile(id, title, message string) {
 		return
 	}
 	_ = os.Rename(tmp, NotifyFile())
+}
+
+// PendingClaim là deal có thể nhận đang chờ người dùng quyết định
+// (bấm popup hoặc chạy `zcode-deal claim`). File này KHÔNG chứa
+// token — claim đọc token từ ~/.zcode/v2 tại thời điểm chạy.
+type PendingClaim struct {
+	CampaignID  string `json:"campaign_id"`
+	Position    string `json:"position"`
+	PlanID      string `json:"plan_id,omitempty"`
+	ButtonLabel string `json:"button_label,omitempty"`
+	ClaimURL    string `json:"claim_url,omitempty"`
+	Title       string `json:"title"`
+	Detail      string `json:"detail"`
+	SavedAt     string `json:"saved_at"`
+}
+
+func PendingClaimFile() string { return filepath.Join(StateDir(), "pending-claim.json") }
+
+// SavePendingClaim ghi deal chờ nhận (ghi đè deal cũ — deal mới ưu
+// tiên) bằng cách ghi tmp rồi rename để không ghi dở dang.
+func SavePendingClaim(deal Deal) {
+	pending := PendingClaim{
+		CampaignID:  deal.CampaignID,
+		Position:    deal.Position,
+		PlanID:      deal.PlanID,
+		ButtonLabel: deal.ButtonLabel,
+		ClaimURL:    deal.ClaimURL,
+		Title:       deal.Title,
+		Detail:      deal.Detail,
+		SavedAt:     time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(pending, "", "  ")
+	if err != nil {
+		return
+	}
+	EnsureStateDir()
+	tmp := PendingClaimFile() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		AppendLog(fmt.Sprintf("[claim] không ghi được pending-claim: %v", err))
+		return
+	}
+	_ = os.Rename(tmp, PendingClaimFile())
+}
+
+func LoadPendingClaim() (PendingClaim, bool) {
+	data, err := os.ReadFile(PendingClaimFile())
+	if err != nil {
+		return PendingClaim{}, false
+	}
+	var pending PendingClaim
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return PendingClaim{}, false
+	}
+	if strings.TrimSpace(pending.CampaignID) == "" {
+		return PendingClaim{}, false
+	}
+	return pending, true
+}
+
+func ClearPendingClaim() {
+	_ = os.Remove(PendingClaimFile())
 }

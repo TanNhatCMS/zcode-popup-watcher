@@ -83,12 +83,10 @@ func runReminder(args map[string]string, bools map[string]bool) int {
 		message := strings.Join([]string{
 			"Tới giờ nhận deal đêm ZCode!",
 			"",
-			"1. Mở ZCode.",
-			"2. Bấm banner/modal deal đêm trong app.",
+			"1. Chờ tool poll: có deal là popup \"Nhận deal\" hiện ra (Windows).",
+			"2. Bấm \"Nhận deal\" trên popup, hoặc chạy: zcode-deal claim.",
 			"3. Từ 22:00 mới dùng được, tới 08:00 sáng hôm sau reset.",
 			"4. Nhớ chọn đúng GLM-5.3-Flash + Global Building.",
-			"",
-			"Tool này chỉ báo, không tự bấm nhận thay bạn.",
 		}, "\n")
 		Notify("ZCode - Tới giờ nhận deal đêm!", message)
 		fmt.Println(message)

@@ -97,14 +97,6 @@ func trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit *systray.MenuItem) {
 
 func trayPollLoop(mDeal *systray.MenuItem) {
 	config := checker.ConfigDir(trayOpts.ConfigDir)
-	locale := os.Getenv("ZCODE_LOCALE")
-	if locale == "" {
-		locale = "en-US"
-	}
-	appVersion := os.Getenv("ZCODE_APP_VERSION")
-	if appVersion == "" {
-		appVersion = "3.17.2"
-	}
 	deviceMid, token, err := resolveAuth(config)
 	if err != nil {
 		logLine(fmt.Sprintf("[gotray] LỖI auth: %v", err))
@@ -114,6 +106,7 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 	if token == "" {
 		logLine("[gotray] Lưu ý: không có token, đang check ẩn danh.")
 	}
+	ctx := newClaimContext(token, deviceMid)
 	interval := time.Duration(trayOpts.IntervalSec) * time.Second
 	if interval < 300*time.Second {
 		logLine("[gotray] Cảnh báo: interval dưới 300s dễ bị 429.")
@@ -121,7 +114,7 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 	seen := checker.LoadSeen()
 	failures := 0
 	for {
-		deals, err := checker.QueryDeals(token, deviceMid, locale, appVersion, traySeq)
+		deals, err := checker.QueryDeals(token, deviceMid, ctx.locale, ctx.appVersion, traySeq)
 		traySeq++
 		if err != nil {
 			failures++
@@ -161,10 +154,13 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 			}
 			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Có deal mới!", message)
 			systray.SetIcon(iconAlert)
-			systray.SetTooltip("ZCode Deal Watcher - CÓ DEAL MỚI! Bấm vào menu deal để mở ZCode.")
+			systray.SetTooltip("ZCode Deal Watcher - CÓ DEAL MỚI! Bấm \"Nhận deal\" trên popup để nhận.")
 			mDeal.SetTitle("Có deal mới - bấm để mở ZCode")
 			mDeal.Show()
 			Notify("ZCode - Có deal mới!", message)
+			// Popup nhận deal: hiện cửa sổ nổi, người dùng bấm
+			// "Nhận deal" tool mới claim (chạy nền, không chặn poll).
+			offerDealClaim(fresh, ctx, false)
 			if trayOpts.AutoOpen {
 				logLine(OpenZcode())
 			}

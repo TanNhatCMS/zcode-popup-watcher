@@ -1,0 +1,349 @@
+// marketing.go — các API nhận deal (claim) port từ source ZCode gốc:
+//
+//	POST /api/v1/marketing/touch/action          (marketingTouchService.ts)
+//	GET  /api/v1/zcode-plan/billing/preview      (bigmodelCodingPlanSubscriptionProvider.ts)
+//	POST /api/v1/zcode-plan/billing/claim        (bigmodelCodingPlanSubscriptionProvider.ts)
+//
+// Hợp đồng khớp app gốc: claim gửi {plan_id} với header Authorization +
+// X-ZCode-App-Version + X-Platform (process.platform-arch, ví dụ
+// win32-x64); report gửi {campaign_id, action_type: confirm|cancel} với
+// cùng header như GET touch. Bản UI open-source của ZCode không gửi thêm
+// header xác thực request nào khác (proof rỗng), nên tool cũng vậy.
+//
+// Token chỉ nằm trong RAM và đi làm header; không bao giờ in ra, ghi
+// log hay ghi file. Claim chỉ chạy khi NGƯỜI DÙNG bấm nút (popup hoặc
+// lệnh claim) — không có auto-claim.
+package checker
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"runtime"
+	"strings"
+	"time"
+)
+
+// DefaultMarketingBase là origin gốc của ZCode API. Set
+// ZCODE_MARKETING_URL để đổi origin này khi test với server mẫu cục bộ
+// (áp dụng cho TẤT CẢ endpoint marketing/billing, không chỉ touch).
+const DefaultMarketingBase = "https://zcode.z.ai"
+
+func marketingBase() string {
+	if override := strings.TrimSpace(os.Getenv("ZCODE_MARKETING_URL")); override != "" {
+		return strings.TrimRight(override, "/")
+	}
+	return DefaultMarketingBase
+}
+
+func marketingEndpoint(path string) string {
+	return marketingBase() + path
+}
+
+const apiTimeout = 15 * time.Second
+
+var apiHTTPClient = &http.Client{Timeout: apiTimeout}
+
+// clientPlatformKey dựng chuỗi X-Platform giống app gốc:
+// process.platform + "-" + process.arch, ví dụ "win32-x64".
+// Go gọi GOOS "windows" còn Node gọi "win32"; arch "amd64" của Go
+// tương ứng "x64" của Node.
+func clientPlatformKey() string {
+	platform := nodePlatform(runtime.GOOS)
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "x64"
+	case "386":
+		arch = "ia32"
+	}
+	return platform + "-" + arch
+}
+
+// authHeaders dựng header chung cho marketing/touch (GET lẫn POST).
+func authHeaders(token, deviceMid, locale, appVersion string) map[string]string {
+	headers := map[string]string{
+		"X-Device-Mid":        deviceMid,
+		"X-Client-Language":   locale,
+		"X-ZCode-App-Version": appVersion,
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	return headers
+}
+
+// ReportTouchAction báo hành động của người dùng về server, giống
+// service.report() của app: POST /api/v1/marketing/touch/action với
+// body {"campaign_id": ..., "action_type": "confirm"|"cancel"}.
+// App gốc coi report là fire-and-forget (lỗi chỉ log), tool cũng vậy.
+// actionType phải là "confirm" hoặc "cancel" — các giá trị khác trả lỗi.
+func ReportTouchAction(token, deviceMid, locale, appVersion, campaignID, actionType string) error {
+	if actionType != "confirm" && actionType != "cancel" {
+		return fmt.Errorf("action_type không hợp lệ: %q (chỉ confirm|cancel)", actionType)
+	}
+	if strings.TrimSpace(campaignID) == "" {
+		return fmt.Errorf("campaign_id rỗng")
+	}
+	body, _ := json.Marshal(map[string]string{
+		"campaign_id": campaignID,
+		"action_type": actionType,
+	})
+	req, err := http.NewRequest(http.MethodPost, marketingEndpoint("/api/v1/marketing/touch/action"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	for key, value := range authHeaders(token, deviceMid, locale, appVersion) {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := apiHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d từ marketing/touch/action", resp.StatusCode)
+	}
+	var envelope struct {
+		Code int `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if envelope.Code != 0 {
+		return fmt.Errorf("marketing/touch/action code != 0 (got %d)", envelope.Code)
+	}
+	return nil
+}
+
+// ClaimPlanPreview là 1 plan nhận được từ endpoint preview.
+type ClaimPlanPreview struct {
+	PlanID       string
+	Name         string
+	Description  string
+	Priority     float64
+	Entitlements []ClaimEntitlement
+}
+
+// ClaimEntitlement là 1 quyền lợi trong plan (token, quota...).
+type ClaimEntitlement struct {
+	EntitlementID string
+	ShowName      string
+	Meter         string
+	UnitType      string
+	Period        string
+	GrantUnits    float64
+}
+
+// PreviewClaimPlans gọi GET /api/v1/zcode-plan/billing/preview để liệt
+// kê plan có thể nhận (dùng cho `zcode-deal claim --list`). Cần token.
+func PreviewClaimPlans(token, appVersion string) ([]ClaimPlanPreview, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("cần token đăng nhập để xem plan nhận được")
+	}
+	u := marketingEndpoint("/api/v1/zcode-plan/billing/preview") +
+		"?app_version=" + url.QueryEscape(appVersion) +
+		"&platform=" + url.QueryEscape(clientPlatformKey())
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-ZCode-App-Version", appVersion)
+	req.Header.Set("X-Platform", clientPlatformKey())
+	resp, err := apiHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Code any    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Plans []struct {
+				PlanID       string  `json:"plan_id"`
+				Name         string  `json:"name"`
+				Description  string  `json:"description"`
+				Priority     float64 `json:"priority"`
+				Entitlements []struct {
+					EntitlementID string  `json:"entitlement_id"`
+					ShowName      string  `json:"show_name"`
+					Meter         string  `json:"meter"`
+					UnitType      string  `json:"unit_type"`
+					Period        string  `json:"period"`
+					GrantUnits    float64 `json:"grant_units"`
+				} `json:"entitlements"`
+			} `json:"plans"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	// App gốc: code là số, nhưng chấp nhận thêm chuỗi số ("0") — billing
+	// endpoint dùng envelope nền tảng (code=0 là thành công).
+	if code := numberCode(payload.Code); code != 0 {
+		msg := strings.TrimSpace(payload.Msg)
+		if msg == "" {
+			msg = fmt.Sprintf("billing/preview code != 0 (got %v)", payload.Code)
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+	var plans []ClaimPlanPreview
+	for _, raw := range payload.Data.Plans {
+		plan := ClaimPlanPreview{
+			PlanID:      strings.TrimSpace(raw.PlanID),
+			Name:        strings.TrimSpace(raw.Name),
+			Description: strings.TrimSpace(raw.Description),
+			Priority:    raw.Priority,
+		}
+		if plan.PlanID == "" {
+			continue
+		}
+		for _, ent := range raw.Entitlements {
+			id := strings.TrimSpace(ent.EntitlementID)
+			if id == "" {
+				continue
+			}
+			plan.Entitlements = append(plan.Entitlements, ClaimEntitlement{
+				EntitlementID: id,
+				ShowName:      strings.TrimSpace(ent.ShowName),
+				Meter:         strings.TrimSpace(ent.Meter),
+				UnitType:      strings.TrimSpace(ent.UnitType),
+				Period:        strings.TrimSpace(ent.Period),
+				GrantUnits:    ent.GrantUnits,
+			})
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+// ClaimResult là kết quả 1 lần claim plan.
+type ClaimResult struct {
+	Success bool
+	Code    int
+	Message string
+	PlanID  string
+	Plan    ClaimPlanPreview
+}
+
+// ClaimPlan gọi POST /api/v1/zcode-plan/billing/claim với body
+// {"plan_id": ...} — đúng endpoint và header app gốc dùng khi người
+// dùng bấm nút nhận deal. Response {code:0, data:{plan}} là thành công;
+// code khác 0 là lỗi (data.message là câu thông điệp đã dịch sẵn của
+// server; 1001-1005 là lỗi dứt điểm không nên thử lại).
+func ClaimPlan(token, planID, appVersion string) (ClaimResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return ClaimResult{Code: 401, Message: "chưa có token đăng nhập"}, fmt.Errorf("chưa có token đăng nhập")
+	}
+	if strings.TrimSpace(planID) == "" {
+		return ClaimResult{}, fmt.Errorf("plan_id rỗng")
+	}
+	body, _ := json.Marshal(map[string]string{"plan_id": planID})
+	req, err := http.NewRequest(http.MethodPost, marketingEndpoint("/api/v1/zcode-plan/billing/claim"), bytes.NewReader(body))
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ZCode-App-Version", appVersion)
+	req.Header.Set("X-Platform", clientPlatformKey())
+	resp, err := apiHTTPClient.Do(req)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Code any `json:"code"`
+		Data struct {
+			Message string `json:"message"`
+			Plan    struct {
+				PlanID       string  `json:"plan_id"`
+				Name         string  `json:"name"`
+				Description  string  `json:"description"`
+				Priority     float64 `json:"priority"`
+				Entitlements []struct {
+					EntitlementID string  `json:"entitlement_id"`
+					ShowName      string  `json:"show_name"`
+					Meter         string  `json:"meter"`
+					UnitType      string  `json:"unit_type"`
+					Period        string  `json:"period"`
+					GrantUnits    float64 `json:"grant_units"`
+				} `json:"entitlements"`
+			} `json:"plan"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return ClaimResult{}, err
+	}
+	code := numberCode(payload.Code)
+	result := ClaimResult{
+		Code:    code,
+		Message: strings.TrimSpace(payload.Data.Message),
+		PlanID:  planID,
+	}
+	if code != 0 || strings.TrimSpace(payload.Data.Plan.PlanID) == "" {
+		result.Success = false
+		return result, nil
+	}
+	result.Success = true
+	result.Plan = ClaimPlanPreview{
+		PlanID:      strings.TrimSpace(payload.Data.Plan.PlanID),
+		Name:        strings.TrimSpace(payload.Data.Plan.Name),
+		Description: strings.TrimSpace(payload.Data.Plan.Description),
+		Priority:    payload.Data.Plan.Priority,
+	}
+	for _, ent := range payload.Data.Plan.Entitlements {
+		id := strings.TrimSpace(ent.EntitlementID)
+		if id == "" {
+			continue
+		}
+		result.Plan.Entitlements = append(result.Plan.Entitlements, ClaimEntitlement{
+			EntitlementID: id,
+			ShowName:      strings.TrimSpace(ent.ShowName),
+			Meter:         strings.TrimSpace(ent.Meter),
+			UnitType:      strings.TrimSpace(ent.UnitType),
+			Period:        strings.TrimSpace(ent.Period),
+			GrantUnits:    ent.GrantUnits,
+		})
+	}
+	return result, nil
+}
+
+// numberCode ép code về số: app gốc gặp cả code dạng số và chuỗi số
+// ("0"); code không xác định thì trả -1 (không bao giờ coi là thành công).
+func numberCode(raw any) int {
+	switch value := raw.(type) {
+	case float64:
+		return int(value)
+	case string:
+		if isAllDigits(value) {
+			return atoiSafe(value)
+		}
+	}
+	return -1
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, r := range s {
+		n = n*10 + int(r-'0')
+	}
+	return n
+}

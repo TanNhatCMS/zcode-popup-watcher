@@ -114,9 +114,9 @@ func handleStop() int {
 }
 
 // formatDealsMessage tạo thông báo deal mới (dùng chung cho
-// check/watch/daemon/tray, giống bản Bun).
+// check/watch/daemon/tray).
 func formatDealsMessage(fresh []checker.Deal) string {
-	lines := []string{"ZCode có deal mới! Mở app và bấm nút nhận trong app.", ""}
+	lines := []string{"ZCode có deal mới!", ""}
 	for _, deal := range fresh {
 		lines = append(lines, fmt.Sprintf("- [%s] %s (priority %v)", deal.Position, deal.CampaignID, deal.Priority))
 		if deal.Title != "" {
@@ -125,8 +125,11 @@ func formatDealsMessage(fresh []checker.Deal) string {
 		if deal.Detail != "" {
 			lines = append(lines, "  "+deal.Detail)
 		}
+		if deal.Claimable() {
+			lines = append(lines, "  → Nhận ngay: bấm \"Nhận deal\" trên popup, hoặc chạy zcode-deal claim")
+		}
 	}
-	lines = append(lines, "", "Tool này chỉ báo, không tự nhận thay bạn.")
+	lines = append(lines, "", "Claim chỉ chạy khi bạn bấm nút — tool không tự nhận ngầm.")
 	return strings.Join(lines, "\n")
 }
 

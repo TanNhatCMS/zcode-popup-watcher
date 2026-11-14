@@ -97,14 +97,6 @@ func runTrayChild(opts TrayOptions) int {
 	checker.EnsureStateDir()
 	configDir := checker.ConfigDir(opts.ConfigDir)
 	interval := time.Duration(opts.IntervalSec) * time.Second
-	locale := os.Getenv("ZCODE_LOCALE")
-	if locale == "" {
-		locale = "en-US"
-	}
-	appVersion := os.Getenv("ZCODE_APP_VERSION")
-	if appVersion == "" {
-		appVersion = "3.17.2"
-	}
 	cleanup := func() { removePidFileIfMine(os.Getpid()) }
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -125,11 +117,12 @@ func runTrayChild(opts TrayOptions) int {
 	if token == "" {
 		logLine("[tray-child] Lưu ý: không có token, đang check ẩn danh.")
 	}
+	ctx := newClaimContext(token, deviceMid)
 	seq := 0
 	failures := 0
 	seen := checker.LoadSeen()
 	for {
-		deals, err := checker.QueryDeals(token, deviceMid, locale, appVersion, seq)
+		deals, err := checker.QueryDeals(token, deviceMid, ctx.locale, ctx.appVersion, seq)
 		if err != nil {
 			failures++
 			delay := 30 * time.Second * time.Duration(1<<minInt(failures-1, 5))
@@ -165,6 +158,9 @@ func runTrayChild(opts TrayOptions) int {
 			}
 			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Có deal mới!", message)
 			Notify("ZCode - Có deal mới!", message)
+			// Non-Windows không có popup GUI: deal nhận được vẫn nằm
+			// trong pending-claim.json, nhận bằng `zcode-deal claim`.
+			offerDealClaim(fresh, ctx, false)
 			if opts.AutoOpen {
 				logLine(OpenZcode())
 			}

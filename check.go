@@ -10,8 +10,8 @@ import (
 )
 
 const sampleSnapshot = `{"code":0,"data":{"server_time":1793000000,"language":"en-US","deliveries":[
-	{"campaign_id":"sample-night-deal","priority":80,"resource_position":"banner","banner":{"buttons":[{"text":{"format":"plaintext","content":"Nhận ngay"}}],"success_popup":{"title":{"format":"plaintext","content":"Nhận thành công"}}}},
-	{"campaign_id":"sample-popup","priority":90,"resource_position":"popup","popup":{"title":{"format":"plaintext","content":"Deal đêm"},"description":{"format":"plaintext","content":"300M token GLM-5.3-Flash"},"buttons":[{"text":{"format":"plaintext","content":"Nhận"}}]}},
+	{"campaign_id":"sample-night-deal","priority":80,"resource_position":"banner","banner":{"buttons":[{"text":{"format":"plaintext","content":"Nhận ngay"},"action":{"type":"claim_zcode_plan","args":{"plan_id":"plan-sample-banner"}}}],"success_popup":{"title":{"format":"plaintext","content":"Nhận thành công"}}}},
+	{"campaign_id":"sample-popup","priority":90,"resource_position":"popup","popup":{"title":{"format":"plaintext","content":"Deal đêm"},"description":{"format":"plaintext","content":"300M token GLM-5.3-Flash"},"buttons":[{"text":{"format":"plaintext","content":"Nhận"},"action":{"type":"claim_zcode_plan","args":{"plan_id":"plan-sample-123"}}},{"text":{"format":"plaintext","content":"Đóng"},"action":{"type":"close"}}]}},
 	{"campaign_id":"sample-banner-duplicate","priority":10,"resource_position":"banner","banner":{"buttons":[]}}
 ]}}`
 
@@ -21,6 +21,7 @@ type checkOptions struct {
 	locale     string
 	appVersion string
 	autoOpen   bool
+	noPopup    bool
 	once       bool
 	dryRun     bool
 	selfTest   bool
@@ -33,20 +34,13 @@ func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOpt
 			intervalSec = n
 		}
 	}
-	locale := os.Getenv("ZCODE_LOCALE")
-	if locale == "" {
-		locale = "en-US"
-	}
-	appVersion := os.Getenv("ZCODE_APP_VERSION")
-	if appVersion == "" {
-		appVersion = "3.17.2"
-	}
 	return checkOptions{
 		configDir:  args["config-dir"],
 		interval:   time.Duration(intervalSec) * time.Second,
-		locale:     locale,
-		appVersion: appVersion,
+		locale:     localeOrDefault(),
+		appVersion: appVersionOrDefault(),
 		autoOpen:   bools["open"],
+		noPopup:    bools["no-popup"],
 		once:       bools["once"],
 		dryRun:     bools["dry-run"],
 		selfTest:   bools["self-test"],
@@ -67,7 +61,11 @@ func runSelfTest() int {
 	}
 	fmt.Printf("[checker] self-test OK: %d delivery (banner 1 + popup 1, bản trùng vị trí đã bị loại):\n", len(deals))
 	for _, deal := range deals {
-		fmt.Printf("  - %s | %s | %s\n", deal.Key, deal.Title, deal.Detail)
+		fmt.Printf("  - %s | %s | %s", deal.Key, deal.Title, deal.Detail)
+		if deal.PlanID != "" {
+			fmt.Printf(" | plan nhận được: %s (nút %q)", deal.PlanID, deal.ButtonLabel)
+		}
+		fmt.Println()
 	}
 	return 0
 }
@@ -95,8 +93,9 @@ func runDryRun(opts checkOptions) int {
 		hasJwt = "có"
 	}
 	fmt.Printf("[checker] có zcodejwttoken: %s\n", hasJwt)
-	fmt.Printf("[checker] API: %s, locale: %s, app-version: %s, interval: %ds\n", checker.APIURL, opts.locale, opts.appVersion, int(opts.interval.Seconds()))
-	fmt.Println("[checker] Chế độ: chỉ GET marketing/touch, không POST action, không claim, không in token.")
+	fmt.Printf("[checker] API: %s, locale: %s, app-version: %s, interval: %ds\n", checker.DefaultMarketingBase, opts.locale, opts.appVersion, int(opts.interval.Seconds()))
+	fmt.Println("[checker] Chế độ: GET marketing/touch để báo deal. Claim chỉ chạy khi bạn bấm")
+	fmt.Println("[checker] \"Nhận deal\" trên popup hoặc gõ y ở lệnh claim — không auto-claim, không report gì khi chỉ xem.")
 	return 0
 }
 
@@ -197,6 +196,15 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 			}
 			checker.SaveSeen(seen)
 			Notify("ZCode - Có deal mới!", formatDealsMessage(fresh))
+			if opts.noPopup {
+				// Không hiện popup: vẫn lưu deal nhận được để
+				// `zcode-deal claim` dùng được từ terminal.
+				recordPendingClaim(fresh)
+			} else {
+				// Popup nhận deal (Windows): người dùng bấm "Nhận deal"
+				// tool mới claim. --once block chờ chọn xong rồi thoát.
+				offerDealClaim(fresh, newClaimContext(token, deviceMid), opts.once)
+			}
 			if opts.autoOpen {
 				fmt.Println(OpenZcode())
 			}

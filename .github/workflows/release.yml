@@ -1,14 +1,13 @@
 name: Release
 
 # Cach phat hanh:
-#   git tag v0.1.0
-#   git push origin v0.1.0
-# Workflow nay se build zcode-deal.exe (Windows x64) va zcode-deal
-# (Linux x64) bang Bun compile, roi tao GitHub Release mang ten tag
-# va dinh kem ca 2 file + exe Windows cua app tray Go
-# (job release-gotray, cross-build tu Ubuntu).
+#   git tag v2.1.0
+#   git push origin v2.1.0
+# Workflow build 1 lan (Ubuntu, cross-build) roi tao GitHub Release
+# mang ten tag, dinh kem zcode-deal.exe (Windows x64, khong console)
+# va zcode-deal (Linux x64).
 # Cung co the chay thu cong tu tab Actions (workflow_dispatch) voi
-# input tag, vi du v0.1.0.
+# input tag.
 
 on:
   push:
@@ -17,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag cua release can tao (vi du v0.1.0)"
+        description: "Tag cua release can tao (vi du v2.1.0)"
         required: true
         type: string
 
@@ -30,14 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v7
         with:
-          bun-version: "1.4.4"
+          go-version: "1.27"
 
       - name: Build exe Windows + binary Linux
         run: |
-          bun run build:exe
-          bun run build:exe:linux
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal.exe .
+          CGO_ENABLED=0 go build -o dist/zcode-deal .
           ls -lh dist/
           file dist/zcode-deal.exe dist/zcode-deal
 
@@ -57,40 +56,4 @@ jobs:
           else
             gh release create "$TAG" --title "$TAG" --generate-notes \
               dist/zcode-deal.exe dist/zcode-deal
-          fi
-
-  release-gotray:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.27"
-
-      - name: Build app tray Go (Windows)
-        working-directory: tray-go
-        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -o dist/zcode-deal-tray.exe .
-
-      - name: Dinh kem exe Windows vao release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${{ github.ref_name }}"
-          fi
-          echo "Release tag: $TAG"
-          # Cho job release (Ubuntu) tao release truoc neu co the;
-          # neu chua co thi job nay tu tao.
-          for i in 1 2 3 4 5 6; do
-            if gh release view "$TAG" >/dev/null 2>&1; then break; fi
-            sleep 20
-          done
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" --clobber tray-go/dist/zcode-deal-tray.exe
-          else
-            gh release create "$TAG" --title "$TAG" --generate-notes tray-go/dist/zcode-deal-tray.exe
           fi

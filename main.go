@@ -13,9 +13,9 @@ import (
 	"os"
 )
 
-const version = "2.0.0"
+const version = "2.1.0"
 
-const helpText = `zcode-deal ` + version + ` - Theo dõi deal ZCode, chỉ báo, không tự nhận.
+const helpText = `zcode-deal ` + version + ` - Theo dõi deal ZCode, popup nhận deal khi bạn bấm.
 
 Cách dùng:
   zcode-deal <lệnh> [tùy chọn]
@@ -23,19 +23,25 @@ Cách dùng:
       Không tham số: tự mở tray (tương đương lệnh tray).
 
 Lệnh:
-  check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--dry-run] [--self-test]
+  check [--once] [--interval GIÂY] [--config-dir DIR] [--open] [--no-popup] [--dry-run] [--self-test]
       Kiểm tra deal qua API marketing/touch. Mặc định poll liên tục
       mỗi 600 giây; --once chỉ kiểm tra 1 lần rồi thoát.
+      Có deal có thể nhận: hiện popup (Windows) — bấm "Nhận deal" tool
+      mới claim giúp bạn, không bấm thì không claim gì cả.
   watch [tùy chọn như check]
       Giống check (poll liên tục).
   tray [--interval GIÂY] [--config-dir DIR] [--open]
-      Trên Windows: mở app tray Go (icon + menu native).
+      Trên Windows: mở app tray (icon + menu native + popup nhận deal).
       Ngoài Windows: chạy daemon tách rời, lệnh thoát ngay, tắt được
       terminal.
+  claim [--config-dir DIR] [--list]
+      Nhận deal đang chờ (pending-claim.json) theo xác nhận y/N trong
+      terminal — dùng khi không bấm được popup. --list xem các plan
+      nhận được qua API billing/preview.
   status
-      Daemon / app tray Go có đang chạy không? Xem vài dòng log cuối.
+      Daemon / app tray có đang chạy không? Xem vài dòng log cuối.
   stop
-      Dùng daemon (app tray Go thoát bằng menu Thoát trong tray).
+      Dừng daemon (app tray thoát bằng menu Thoát trong tray).
   reminder [--from HH:MM] [--to HH:MM] [--open]
       Nhắc theo khung giờ deal đêm (mặc định 17:55-22:10 giờ VN),
       1 lần/ngày, không gọi API.
@@ -51,12 +57,14 @@ Lệnh:
 Ví dụ:
   zcode-deal check --once
   zcode-deal tray --open
+  zcode-deal claim
   zcode-deal status
   zcode-deal stop
   zcode-deal reminder --test
 
 State nằm ở ~/.zcode/mod/. Token chỉ đọc từ ~/.zcode/v2 trên cùng
-máy/cùng user với ZCode, không bao giờ in ra hay ghi ra file.
+máy/cùng user với ZCode, không bao giờ in ra hay ghi ra file. Claim
+chỉ chạy khi bạn bấm nút (popup) hoặc gõ y ở lệnh claim.
 `
 
 // parseArgs port hàm parseArgs bản Bun: --key value hoặc --flag.
@@ -120,6 +128,8 @@ func run(argv []string) int {
 		return handleStatus()
 	case "stop":
 		return handleStop()
+	case "claim":
+		return runClaim(args, bools)
 	case "reminder":
 		return runReminder(args, bools)
 	case "self-test":
