@@ -92,9 +92,11 @@ func parseHHMM(s string) (int, bool) {
 	if len(parts) != 2 {
 		return 0, false
 	}
-	h, err1 := atoiCheck(parts[0])
-	m, err2 := atoiCheck(parts[1])
-	if err1 || err2 || h < 0 || h > 23 || m < 0 || m > 59 {
+	// atoiCheck trả bool = "hợp lệ" (không phải err!) — điều kiện hỏng
+	// là !ok.
+	h, okH := atoiCheck(parts[0])
+	m, okM := atoiCheck(parts[1])
+	if !okH || !okM || h < 0 || h > 23 || m < 0 || m > 59 {
 		return 0, false
 	}
 	return h*60 + m, true
