@@ -82,91 +82,30 @@ func trayOnReady() {
 	systray.AddSeparator()
 	mOpen := systray.AddMenuItem("Mở ZCode", "Mở app ZCode")
 	mCheck := systray.AddMenuItem("Kiểm tra ngay", "Kiểm tra deal ngay, không đợi hết chu kỳ")
-	mAuto := systray.AddMenuItemCheckbox(autostartMenuTitle, autostartTooltip, autostartEnabled())
-
-	// --- Cài đặt check deal: tài khoản + khung giờ (settings bền) ---
-	checkSettings := checker.LoadDealSettings()
-	mSettings := systray.AddMenuItem("Cài đặt check deal", "Tài khoản + khung giờ check deal")
-	mCheckAcc := mSettings.AddSubMenuItem("Tài khoản check deal", "Chọn tài khoản dùng gọi API check deal")
-	mAccDefault := mCheckAcc.AddSubMenuItemCheckbox(
-		"Mặc định (tài khoản đang login ZCode)",
-		"JWT từ ~/.zcode/v2 của tài khoản đang đăng nhập",
-		checkSettings.CheckAccount == "default" || checkSettings.CheckAccount == "")
-	var mAccItems []*systray.MenuItem
-	var accKeys []string
-	for _, acc := range checker.ListCockpitZcodeAccounts() {
-		if acc.JWT == "" {
-			continue
-		}
-		label := acc.Email
-		if acc.PlanType != "" {
-			label += " (" + acc.PlanType + ")"
-		}
-		checked := strings.EqualFold(checkSettings.CheckAccount, acc.Email) ||
-			strings.EqualFold(checkSettings.CheckAccount, acc.ID)
-		mAccItems = append(mAccItems, mCheckAcc.AddSubMenuItemCheckbox(label, "JWT lưu trong cockpit-tools", checked))
-		accKeys = append(accKeys, acc.Email)
-	}
-	mWindow := systray.AddMenuItemCheckbox(
-		fmt.Sprintf("Chỉ check trong khung giờ deal (%s-%s giờ VN)", checkSettings.CheckFrom, checkSettings.CheckTo),
-		"Ngoài khung giờ KHÔNG gọi API check deal",
-		checkSettings.CheckWindowEnabled)
-
-	// Tick đúng item đang hoạt động (nguồn sự thật = settings file).
-	refreshCheckAccountTicks := func() {
-		s := checker.LoadDealSettings()
-		setTick := func(item *systray.MenuItem, active bool) {
-			if active {
-				item.Check()
-			} else {
-				item.Uncheck()
-			}
-		}
-		setTick(mAccDefault, s.CheckAccount == "default" || s.CheckAccount == "")
-		for i := range mAccItems {
-			setTick(mAccItems[i], strings.EqualFold(s.CheckAccount, accKeys[i]))
-		}
-	}
-	// Mỗi item tự xử lý click của mình (số item động, không gom select).
-	go func() {
-		for range mAccDefault.ClickedCh {
-			applyCheckAccount("default")
-			refreshCheckAccountTicks()
-		}
-	}()
-	for i := range mAccItems {
-		key := accKeys[i]
-		go func() {
-			for range mAccItems[i].ClickedCh {
-				applyCheckAccount(key)
-				refreshCheckAccountTicks()
-			}
-		}()
-	}
-	go func() {
-		for range mWindow.ClickedCh {
-			s := checker.LoadDealSettings()
-			s.CheckWindowEnabled = !s.CheckWindowEnabled
-			checker.SaveDealSettings(s)
-			if s.CheckWindowEnabled {
-				mWindow.Check()
-				logLine(fmt.Sprintf("[gotray] Đã BẬT khung giờ check %s-%s giờ VN — ngoài khung không gọi API.", s.CheckFrom, s.CheckTo))
-			} else {
-				mWindow.Uncheck()
-				logLine("[gotray] Đã TẮT khung giờ check — kiểm tra mọi lúc.")
-			}
-		}
-	}()
-
-	mLog := systray.AddMenuItem("Mở log", "Mở file log")
+	mSettingsClick := systray.AddMenuItem("Cài đặt…", "Mở cửa sổ cài đặt: khởi động cùng hệ thống, tài khoản check deal, khung giờ + tần suất")
+	mInfo := systray.AddMenuItem("Thông tin", "Thông tin app, phiên bản, nhật ký, kiểm tra cập nhật")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Thoát", "Thoát app tray")
 
 	checker.EnsureStateDir()
 	_ = os.WriteFile(checker.GotrayPidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+	// Dọn file .old của đợt tự cập nhật trước (exe đổi tên khi đang chạy).
+	if exe, err := os.Executable(); err == nil {
+		_ = os.Remove(exe + ".old")
+	}
 	logLine(fmt.Sprintf("[gotray] Tray Go đã chạy (PID %d), interval %ds.", os.Getpid(), trayOpts.IntervalSec))
 
-	go trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit)
+	go trayHandleMenuClicks(mDeal, mOpen, mCheck, mQuit)
+	go func() {
+		for range mSettingsClick.ClickedCh {
+			showCheckSettingsWindow()
+		}
+	}()
+	go func() {
+		for range mInfo.ClickedCh {
+			showInfoWindow()
+		}
+	}()
 	if authErr == nil {
 		go trayPollLoop(mDeal, token, deviceMid)
 	}
@@ -186,7 +125,7 @@ func trayShowDealPopup() {
 	runClaimPopupFlow(dealFromPending(pending), trayCtx)
 }
 
-func trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit *systray.MenuItem) {
+func trayHandleMenuClicks(mDeal, mOpen, mCheck, mQuit *systray.MenuItem) {
 	for {
 		select {
 		case <-mDeal.ClickedCh:
@@ -195,26 +134,6 @@ func trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit *systray.Menu
 			logLine(OpenZcode())
 		case <-mCheck.ClickedCh:
 			requestTrayCheckNow()
-		case <-mAuto.ClickedCh:
-			// Nguồn sự thật là registry: đọc lại hiện trạng rồi đảo.
-			enable := !autostartEnabled()
-			if err := setAutostart(enable); err != nil {
-				logLine(fmt.Sprintf("[gotray] Không lưu được tuỳ chọn khởi động: %v", err))
-				continue
-			}
-			if enable {
-				mAuto.Check()
-				logLine("[gotray] Đã BẬT khởi động cùng hệ thống (HKCU\\...\\Run → exe tray).")
-			} else {
-				mAuto.Uncheck()
-				logLine("[gotray] Đã TẮT khởi động cùng hệ thống.")
-			}
-		case <-mLog.ClickedCh:
-			if err := openFile(checker.LogFile()); err != nil {
-				logLine(fmt.Sprintf("Không mở được log: %v", err))
-			} else {
-				logLine(fmt.Sprintf("Đã gọi mở log: %s", checker.LogFile()))
-			}
 		case <-mQuit.ClickedCh:
 			systray.Quit()
 			return
@@ -224,25 +143,10 @@ func trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit *systray.Menu
 	}
 }
 
-// trayPollLoop poll marketing/touch liên tục; auth đã resolve trong
-// trayOnReady (thất bại auth thì loop không được khởi động).
-// applyCheckAccount lưu settings.check_account (menu tray tick) —
-// poll loop nạp lại settings mỗi vòng nên có hiệu lực ngay lập tức.
-func applyCheckAccount(key string) {
-	s := checker.LoadDealSettings()
-	s.CheckAccount = key
-	checker.SaveDealSettings(s)
-	label := key
-	if label == "default" || label == "" {
-		label = "mặc định (tài khoản đang login ZCode)"
-	}
-	logLine(fmt.Sprintf("[gotray] Tài khoản check deal: %s", label))
-}
-
 func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
 	ctx := trayCtx
-	interval := time.Duration(trayOpts.IntervalSec) * time.Second
-	if interval < 300*time.Second {
+	baseInterval := time.Duration(trayOpts.IntervalSec) * time.Second
+	if baseInterval < 300*time.Second {
 		logLine("[gotray] Cảnh báo: interval dưới 300s dễ bị 429.")
 	}
 	seen := checker.LoadSeen()
@@ -256,11 +160,15 @@ func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
 			return
 		}
 		pendingCheckNow = pendingCheckNow || checkNow
-		// Nạp lại settings mỗi vòng: đổi account/khung giờ từ menu tray
-		// có hiệu lực ngay vòng kế tiếp.
+		// Nạp lại settings mỗi vòng: đổi account/khung giờ/tần suất từ
+		// cửa sổ cài đặt có hiệu lực ngay vòng kế tiếp.
 		settings := checker.LoadDealSettings()
 		checkToken, checkLabel := checkTokenFor(settings.CheckAccount, token)
 		_ = checkLabel
+		interval := baseInterval
+		if settings.CheckInterval > 0 {
+			interval = time.Duration(settings.CheckInterval) * time.Second
+		}
 		wait = interval
 		// Ngoài khung giờ check → KHÔNG gọi API, ngủ 60s rồi nạp lại
 		// settings. "Kiểm tra ngay" bypass khung giờ 1 lần.
@@ -275,6 +183,7 @@ func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
 			}
 			outsideLogged = false
 		}
+		wasCheckNow := pendingCheckNow
 		pendingCheckNow = false
 		deals, err := checker.QueryDeals(checkToken, deviceMid, ctx.locale, ctx.appVersion, traySeq)
 		traySeq++
@@ -287,6 +196,11 @@ func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
 			logLine(fmt.Sprintf("[gotray] Check lỗi (%v). Đợi %s.", err, delay))
 			systray.SetTooltip(fmt.Sprintf("ZCode Deal Watcher - lỗi check: %v", err))
 			wait = delay
+			// Check do người dùng bấm → báo lỗi bằng popup cho rõ.
+			if wasCheckNow {
+				go alertBox("ZCode Deal - Kiểm tra lỗi",
+					fmt.Sprintf("Kiểm tra deal lỗi lúc %s giờ VN:\n%v", vnClockLabel(), err), true)
+			}
 			continue
 		}
 		failures = 0
@@ -324,6 +238,19 @@ func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
 			if trayOpts.AutoOpen {
 				logLine(OpenZcode())
 			}
+			// Check do người dùng bấm + deal không claim được từ tool →
+			// vẫn cần popup trạng thái (popup claim đã hiện nếu claimable).
+			if wasCheckNow && firstClaimable(fresh) == nil {
+				go alertBox("ZCode Deal - Kiểm tra xong",
+					fmt.Sprintf("Có %d deal mới lúc %s giờ VN nhưng không có nút nhận tool thay được — mở ZCode để nhận.\n\n%s",
+						len(fresh), vnClockLabel(), message), false)
+			}
+		} else if wasCheckNow {
+			// Người dùng vừa bấm "Kiểm tra ngay" → phải thông báo kể cả
+			// khi không có deal mới (popup trạng thái, chạy nền).
+			go alertBox("ZCode Deal - Kiểm tra xong",
+				fmt.Sprintf("KHÔNG có deal mới lúc %s giờ VN.\n\nDelivery hiện có: %d\nTài khoản check: %s\nLần check sau: theo khung giờ/cài đặt",
+					vnClockLabel(), len(deals), checkAccountDisplay(checkLabel)), false)
 		}
 		wait = interval
 	}

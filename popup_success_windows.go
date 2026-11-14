@@ -43,10 +43,10 @@ type planQuotaView struct {
 // showClaimSuccessPopup mở vé nhận deal thành công, BLOCK tới khi
 // người dùng bấm: "ok" (Đã hiểu) / "share" (Chia sẻ) / "none".
 func showClaimSuccessPopup(info ticketInfo) string {
-	if !popupAcquire() {
+	if !popupTryAcquire() {
 		return "busy"
 	}
-	defer popupOpenMu.Unlock()
+	defer popupRelease()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

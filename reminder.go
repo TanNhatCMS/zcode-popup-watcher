@@ -63,6 +63,12 @@ func vnNow() (string, int) {
 	return now.Format("2006-01-02"), now.Hour()*60 + now.Minute()
 }
 
+// vnClockLabel trả giờ VN hiện tại dạng "HH:MM" cho thông báo trạng thái.
+func vnClockLabel() string {
+	_, minutes := vnNow()
+	return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60)
+}
+
 // runReminder port popup-watcher.ts: không gọi API, không đọc token.
 // Den khung giờ deal đêm (mặc định 17:55-22:10 giờ VN) thì báo
 // 1 lần/ngày. --test báo ngay không đợi khung giờ.

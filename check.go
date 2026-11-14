@@ -32,14 +32,17 @@ type checkOptions struct {
 }
 
 func defaultCheckOptions(args map[string]string, bools map[string]bool) checkOptions {
+	// Nền là settings lưu bền (cửa sổ cài đặt tray chỉnh được); flag
+	// CLI đè lên từng phần.
+	settings := checker.LoadDealSettings()
 	intervalSec := 600
 	if v, ok := args["interval"]; ok {
 		if n, err := parseInt(v); err == nil && n > 0 {
 			intervalSec = n
 		}
+	} else if settings.CheckInterval > 0 {
+		intervalSec = settings.CheckInterval
 	}
-	// Nền là settings lưu bền (menu tray chỉnh được); flag CLI đè lên.
-	settings := checker.LoadDealSettings()
 	account := settings.CheckAccount
 	if v := strings.TrimSpace(args["account"]); v != "" {
 		account = v
@@ -267,6 +270,14 @@ func runCheck(args map[string]string, bools map[string]bool) int {
 			return 0
 		}
 	}
+}
+
+// checkAccountDisplay nhãn tài khoản check cho thông báo trạng thái.
+func checkAccountDisplay(checkLabel string) string {
+	if checkLabel == "" {
+		return "Mặc định (tài khoản đang login ZCode)"
+	}
+	return checkLabel
 }
 
 // checkTokenFor trả token dùng gọi API check deal: --account (CLI) >

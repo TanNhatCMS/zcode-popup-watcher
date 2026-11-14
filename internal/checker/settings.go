@@ -26,6 +26,9 @@ type DealSettings struct {
 	CheckWindowEnabled bool   `json:"check_window_enabled"`
 	CheckFrom          string `json:"check_from"`
 	CheckTo            string `json:"check_to"`
+	// CheckInterval là tần suất poll (giây) khi settings đặt > 0;
+	// 0 = dùng interval mặc định / flag --interval của CLI.
+	CheckInterval int `json:"check_interval"`
 }
 
 const (
@@ -72,7 +75,16 @@ func LoadDealSettings() DealSettings {
 	if t := strings.TrimSpace(saved.CheckTo); t != "" {
 		s.CheckTo = t
 	}
+	if saved.CheckInterval > 0 {
+		s.CheckInterval = saved.CheckInterval
+	}
 	return s
+}
+
+// ParseHHMM là wrapper công khai của parseHHMM cho UI cài đặt validate
+// giờ người dùng nhập ("HH:MM" giờ VN).
+func ParseHHMM(s string) (int, bool) {
+	return parseHHMM(s)
 }
 
 // SaveDealSettings ghi settings (atomic không cần thiết — file nhỏ,

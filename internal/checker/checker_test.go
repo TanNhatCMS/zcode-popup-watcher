@@ -233,6 +233,25 @@ func TestParseAccountUser(t *testing.T) {
 	}
 }
 
+func TestCompareVersions(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"v2.2.0", "2.1.0", 1},
+		{"2.1.0", "2.1.0", 0},
+		{"2.0.9", "2.1.0", -1},
+		{"v2.1.1", "2.1.0", 1},
+		{"2.10.0", "2.9.0", 1},      // số so sánh theo giá trị, không theo chuỗi
+		{"v2.1.0-beta", "2.1.0", 0}, // hậu tố bỏ qua
+	}
+	for _, c := range cases {
+		if got := CompareVersions(c.a, c.b); got != c.want {
+			t.Fatalf("CompareVersions(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestDealSettingsWindow(t *testing.T) {
 	s := DealSettings{CheckFrom: "17:55", CheckTo: "22:10"}
 	if !s.InCheckWindow(18 * 60) {

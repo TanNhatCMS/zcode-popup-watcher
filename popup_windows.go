@@ -45,10 +45,15 @@ var (
 	procEndPaint            = user32.NewProc("EndPaint")
 	procDrawTextW           = user32.NewProc("DrawTextW")
 	procGetClientRect       = user32.NewProc("GetClientRect")
+	procGetWindowTextW      = user32.NewProc("GetWindowTextW")
 	procFillRect            = user32.NewProc("FillRect")
 	procGetDC               = user32.NewProc("GetDC")
 	procReleaseDC           = user32.NewProc("ReleaseDC")
 	procAdjustWindowRect    = user32.NewProc("AdjustWindowRect")
+	procMoveToEx            = user32.NewProc("MoveToEx")
+	procLineTo              = user32.NewProc("LineTo")
+	procInvalidateRect      = user32.NewProc("InvalidateRect")
+	procIsWindow            = user32.NewProc("IsWindow")
 	procSetBkMode           = gdi32.NewProc("SetBkMode")
 	procSetTextColor        = gdi32.NewProc("SetTextColor")
 	procSelectObject        = gdi32.NewProc("SelectObject")
@@ -80,6 +85,7 @@ const (
 	wmPaint      = 0x000F
 	wmEraseBkgnd = 0x0014
 	wmSetFont    = 0x0030
+	wmLButtonUp  = 0x0202
 
 	swShow = 1
 
@@ -112,6 +118,10 @@ const (
 	cbAddString     = 0x00000143
 	cbSetCurSel     = 0x0000014E
 	cbGetCurSel     = 0x00000147
+
+	// Button checkbox + EDIT.
+	wsBorder   = 0x00800000
+	bstChecked = 1
 
 	bkTransparent = 1
 
@@ -183,10 +193,56 @@ type paintStructW struct {
 	RgbReserved [32]byte
 }
 
-// popupOpenMu chỉ cho 1 popup tại 1 thời điểm (deal + vé dùng chung):
-// deal mới đến khi popup đang mở được ghi vào pending-claim.json và bỏ
-// qua để không chồng cửa sổ.
-var popupOpenMu sync.Mutex
+// Popup holder: chỉ cho 1 popup tại 1 thời điểm (deal + vé + cài đặt
+// dùng chung) nhưng TỰ PHỤC HỒI — holder theo dõi HWND cửa sổ; nếu
+// cửa sổ đã chết mà chưa nhả (lộ trình thoát nào đó bị lỗi) thì lần
+// acquire kế tiếp chiếm quyền lại thay vì chặn oan mãi.
+var (
+	popupMu       sync.Mutex
+	popupHwnd     uintptr
+	popupCreating bool
+)
+
+func isWindow(hwnd uintptr) bool {
+	if hwnd == 0 {
+		return false
+	}
+	res, _, _ := procIsWindow.Call(hwnd)
+	return res != 0
+}
+
+// popupTryAcquire chiếm quyền mở popup; false = đã có popup khác sống.
+func popupTryAcquire() bool {
+	popupMu.Lock()
+	defer popupMu.Unlock()
+	if popupCreating {
+		return false
+	}
+	if popupHwnd != 0 && isWindow(popupHwnd) {
+		return false
+	}
+	if popupHwnd != 0 {
+		logLine(fmt.Sprintf("[popup] Popup cũ (hwnd %x) đã chết nhưng chưa nhả lock — chiếm quyền lại.", popupHwnd))
+	}
+	popupCreating = true
+	return true
+}
+
+// popupSetHwnd báo HWND của popup vừa tạo xong.
+func popupSetHwnd(hwnd uintptr) {
+	popupMu.Lock()
+	defer popupMu.Unlock()
+	popupCreating = false
+	popupHwnd = hwnd
+}
+
+// popupRelease nhả quyền khi popup đóng/bị hủy.
+func popupRelease() {
+	popupMu.Lock()
+	defer popupMu.Unlock()
+	popupCreating = false
+	popupHwnd = 0
+}
 
 func utf16Ptr(s string) *uint16 {
 	ptr, err := windows.UTF16PtrFromString(s)
@@ -209,9 +265,6 @@ func sysDPI() int {
 func scaleValue(value, dpi int) int {
 	return value * dpi / 96
 }
-
-// popupAcquire giữ popupOpenMu; trả false nếu đã có popup khác mở.
-func popupAcquire() bool { return popupOpenMu.TryLock() }
 
 // alertBox hiện MessageBox OK đơn giản (lỗi claim).
 func alertBox(title, text string, isError bool) {
@@ -282,10 +335,10 @@ func fillRectColor(hdc uintptr, rect rectI, color uint32) {
 // chọn. Kết quả kèm chỉ số tài khoản đã chọn trong combobox (0 = mặc
 // định): "claim" / "later" / "open" / "none" / "busy".
 func showDealPopup(info popupDealInfo) popupChoice {
-	if !popupAcquire() {
+	if !popupTryAcquire() {
 		return popupChoice{Choice: "busy"}
 	}
-	defer popupOpenMu.Unlock()
+	defer popupRelease()
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -303,6 +356,7 @@ type drawLine struct {
 	font  uintptr
 	color uint32
 	rect  rectI
+	flags uintptr // DrawTextW flags bổ sung (DT_CENTER cho dòng giữa, …)
 }
 
 type popupState struct {
@@ -485,6 +539,7 @@ func runPopupWindow(info popupDealInfo, resultCh chan popupChoice) error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
+	popupSetHwnd(hwnd)
 
 	fontButton := newUIFont(dpi, 400, -14)
 	defer fontButton.release()

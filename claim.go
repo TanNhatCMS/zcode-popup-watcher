@@ -120,6 +120,7 @@ func recordPendingClaim(fresh []checker.Deal) {
 // mặc định là tài khoản đang đăng nhập trong ZCode, tiếp theo là các
 // tài khoản lưu trong cockpit-tools.
 type accountChoice struct {
+	Key       string // "default" hoặc email tài khoản cockpit
 	Label     string
 	Token     string // JWT dùng để claim
 	IsDefault bool
@@ -146,6 +147,7 @@ func buildAccountChoices(ctx claimContext) []accountChoice {
 		}
 	}
 	choices = append(choices, accountChoice{
+		Key:       "default",
 		Label:     "Mặc định: " + defaultLabel,
 		Token:     ctx.token,
 		IsDefault: true,
@@ -164,7 +166,7 @@ func buildAccountChoices(ctx claimContext) []accountChoice {
 		if acc.PlanType != "" {
 			label += " (" + acc.PlanType + ")"
 		}
-		choices = append(choices, accountChoice{Label: label, Token: acc.JWT})
+		choices = append(choices, accountChoice{Key: acc.Email, Label: label, Token: acc.JWT})
 	}
 	return choices
 }
