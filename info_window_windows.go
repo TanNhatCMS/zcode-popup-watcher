@@ -89,7 +89,10 @@ func runInfoWindow(done chan struct{}) error {
 		}
 		state.lines = append(state.lines, drawLine{
 			text: text, font: font.handle, color: color,
-			rect:  rectI{Left: int32(margins), Top: int32(top), Right: int32(W - margins), Bottom: int32(top + height)},
+			rect: rectI{
+				Left: int32(margins), Top: int32(scaleValue(top, dpi)),
+				Right: int32(W - margins), Bottom: int32(scaleValue(top+height, dpi)),
+			},
 			flags: flags,
 		})
 	}

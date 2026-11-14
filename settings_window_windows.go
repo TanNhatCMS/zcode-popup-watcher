@@ -102,7 +102,7 @@ func runSettingsWindow(done chan struct{}) error {
 	}()
 
 	const winW = 480
-	const winH = 372
+	const winH = 392
 	W := scaleValue(winW, dpi)
 	H := scaleValue(winH, dpi)
 	screenW, _, _ := procGetSystemMetrics.Call(uintptr(smCXScreen))
@@ -119,19 +119,24 @@ func runSettingsWindow(done chan struct{}) error {
 		}
 	}()
 
-	// Các nhãn tĩnh vẽ trong WM_PAINT (nền navy).
+	// Các nhãn tĩnh vẽ trong WM_PAINT (nền navy). Rect phải scale DPI
+	// giống control/font — không scale thì nhãn render lệch lên trên
+	// và bị control đè lên (bug "chồng chéo").
 	margins := scaleValue(24, dpi)
 	add := func(text string, font uiFont, color uint32, top, height int) {
 		state.lines = append(state.lines, drawLine{
 			text: text, font: font.handle, color: color,
-			rect: rectI{Left: int32(margins), Top: int32(top), Right: int32(W - margins), Bottom: int32(top + height)},
+			rect: rectI{
+				Left: int32(margins), Top: int32(scaleValue(top, dpi)),
+				Right: int32(W - margins), Bottom: int32(scaleValue(top+height, dpi)),
+			},
 		})
 	}
 	add("KHỞI ĐỘNG CÙNG HỆ THỐNG", fontHeader, colTextWhite, 16, 18)
-	add("CHECK DEAL", fontHeader, colTextWhite, 78, 18)
-	add("Từ / Đến (HH:MM giờ VN):", fontBody, colTextGrey, 132, 20)
-	add("Tài khoản check deal:", fontBody, colTextGrey, 186, 20)
-	add("Tần suất check:", fontBody, colTextGrey, 246, 20)
+	add("CHECK DEAL", fontHeader, colTextWhite, 84, 18)
+	add("Từ / Đến (HH:MM giờ VN):", fontBody, colTextGrey, 146, 20)
+	add("Tài khoản check deal:", fontBody, colTextGrey, 214, 20)
+	add("Tần suất check:", fontBody, colTextGrey, 278, 20)
 
 	className := utf16Ptr("ZCodeDealSettingsWnd")
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
@@ -194,15 +199,15 @@ func runSettingsWindow(done chan struct{}) error {
 			Text: text,
 		})
 	}
-	addCheckRow(scaleValue(40, dpi), autostartEnabled(), "Tự mở zcode-deal khi đăng nhập Windows")
-	addCheckRow(scaleValue(102, dpi), s.CheckWindowEnabled, "Chỉ check trong khung giờ (ngoài khung KHÔNG gọi API)")
+	addCheckRow(scaleValue(44, dpi), autostartEnabled(), "Tự mở zcode-deal khi đăng nhập Windows")
+	addCheckRow(scaleValue(110, dpi), s.CheckWindowEnabled, "Chỉ check trong khung giờ (ngoài khung KHÔNG gọi API)")
 
 	// Ô giờ from/to (EDIT trắng — control nhập liệu giữ nền sáng).
 	edW := scaleValue(110, dpi)
 	gapS := scaleValue(8, dpi)
-	state.edFrom = createControl("EDIT", s.CheckFrom, wsBorder, hInstance, margins+scaleValue(56, dpi), scaleValue(156, dpi), edW, scaleValue(24, dpi), hwnd, idEdFrom)
+	state.edFrom = createControl("EDIT", s.CheckFrom, wsBorder, hInstance, margins+scaleValue(56, dpi), scaleValue(170, dpi), edW, scaleValue(24, dpi), hwnd, idEdFrom)
 	procSendMessageW.Call(state.edFrom, uintptr(wmSetFont), fontBody.handle, 1)
-	state.edTo = createControl("EDIT", s.CheckTo, wsBorder, hInstance, margins+scaleValue(56, dpi)+edW+gapS, scaleValue(156, dpi), edW, scaleValue(24, dpi), hwnd, idEdTo)
+	state.edTo = createControl("EDIT", s.CheckTo, wsBorder, hInstance, margins+scaleValue(56, dpi)+edW+gapS, scaleValue(170, dpi), edW, scaleValue(24, dpi), hwnd, idEdTo)
 	procSendMessageW.Call(state.edTo, uintptr(wmSetFont), fontBody.handle, 1)
 
 	// Combobox tài khoản: "default" + các tài khoản cockpit có JWT.
@@ -211,7 +216,7 @@ func runSettingsWindow(done chan struct{}) error {
 		uintptr(unsafe.Pointer(utf16Ptr("COMBOBOX"))),
 		uintptr(0),
 		uintptr(wsChild|wsVisible|cbsDropdownList),
-		uintptr(int32(margins)), uintptr(int32(scaleValue(210, dpi))), uintptr(uint32(cw)), uintptr(uint32(scaleValue(170, dpi))),
+		uintptr(int32(margins)), uintptr(int32(scaleValue(238, dpi))), uintptr(uint32(cw)), uintptr(uint32(scaleValue(170, dpi))),
 		hwnd, uintptr(idCboAccount), hInstance, 0,
 	)
 	procSendMessageW.Call(state.cboAccount, uintptr(wmSetFont), fontBody.handle, 1)
@@ -236,7 +241,7 @@ func runSettingsWindow(done chan struct{}) error {
 		uintptr(unsafe.Pointer(utf16Ptr("COMBOBOX"))),
 		uintptr(0),
 		uintptr(wsChild|wsVisible|cbsDropdownList),
-		uintptr(int32(margins)), uintptr(int32(scaleValue(270, dpi))), uintptr(uint32(cw)), uintptr(uint32(scaleValue(170, dpi))),
+		uintptr(int32(margins)), uintptr(int32(scaleValue(302, dpi))), uintptr(uint32(cw)), uintptr(uint32(scaleValue(170, dpi))),
 		hwnd, uintptr(idCboFreq), hInstance, 0,
 	)
 	procSendMessageW.Call(state.cboFreq, uintptr(wmSetFont), fontBody.handle, 1)
@@ -248,7 +253,7 @@ func runSettingsWindow(done chan struct{}) error {
 	}
 
 	saveW := scaleValue(150, dpi)
-	btnY := scaleValue(322, dpi)
+	btnY := scaleValue(340, dpi)
 	hSave := createControl("BUTTON", "Lưu cài đặt", bsDefPushButton|bsPushButton, hInstance,
 		(W-saveW)/2, btnY, saveW, scaleValue(34, dpi), hwnd, idBtnSave)
 	procSendMessageW.Call(hSave, uintptr(wmSetFont), fontButton.handle, 1)
