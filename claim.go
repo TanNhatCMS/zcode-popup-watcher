@@ -94,15 +94,14 @@ func recordPendingClaim(fresh []checker.Deal) {
 
 // popupDealInfo là toàn bộ chi tiết popup cần vẽ khi CÓ deal (bố cục
 // như banner tối màu của app: header plan → title → số token lớn → mô
-// tả → entitlements → nút bấm). HeroPNG nil → popup text-only.
+// tả → nút bấm).
 type popupDealInfo struct {
-	Title       string
-	Desc        string
-	PlanName    string             // nhãn header kiểu "ZCODE GLOBAL BUILD"
-	Quota       *checker.PlanQuota // số token lớn (nếu đọc được)
-	ButtonLabel string
+	Title        string
+	Desc         string
+	PlanName     string             // nhãn header kiểu "ZCODE GLOBAL BUILD"
+	Quota        *checker.PlanQuota // số token lớn (nếu đọc được)
+	ButtonLabel  string
 	Entitlements []string
-	HeroPNG     []byte
 }
 
 // ticketInfo là dữ liệu popup vé SAU KHI nhận deal thành công (bố cục
@@ -115,9 +114,9 @@ type ticketInfo struct {
 	ShareText string // nội dung chép vào clipboard khi bấm Chia sẻ
 }
 
-// buildPopupDealInfo gom chi tiết deal cho popup: tải ảnh hero (verify
-// SHA-256) + dữ liệu vé từ args.zcode_plan (giống heroData() của app)
-// + entitlements thật từ billing/preview. Mọi phần lỗi đều fail-soft.
+// buildPopupDealInfo gom chi tiết deal cho popup: dữ liệu vé từ
+// args.zcode_plan (giống heroData() của app) + entitlements thật từ
+// billing/preview. Mọi phần lỗi đều fail-soft.
 func buildPopupDealInfo(deal checker.Deal, ctx claimContext) popupDealInfo {
 	info := popupDealInfo{
 		Title:       deal.Title,
@@ -129,13 +128,6 @@ func buildPopupDealInfo(deal checker.Deal, ctx claimContext) popupDealInfo {
 	if deal.ZcodePlan != nil {
 		info.PlanName = deal.ZcodePlan.Name
 		info.Quota = checker.QuotaFromEntitlements(deal.ZcodePlan.Entitlements)
-	}
-	if deal.HeroSrc != "" {
-		if data, err := checker.FetchMarketingAsset(deal.HeroSrc, deal.HeroSHA256); err == nil {
-			info.HeroPNG = data
-		} else {
-			logLine(fmt.Sprintf("[claim] Bỏ qua ảnh deal (tải/verify SHA-256 lỗi): %v", err))
-		}
 	}
 	if ctx.token != "" && deal.PlanID != "" {
 		if plans, err := checker.PreviewClaimPlans(ctx.token, ctx.appVersion); err == nil {
@@ -164,8 +156,8 @@ func buildPopupDealInfo(deal checker.Deal, ctx claimContext) popupDealInfo {
 	return info
 }
 
-// entitlementLines render danh sách quyền lợi thành các dòng gọn
-// "· 300M token GLM-5.3-Flash (300 M day)".
+// entitlementLines render danh sách quyền lợi thành các dòng gọn kiểu
+// "· GLM-5.3-Flash · 300M Tokens (day)" — số viết tắt như vé của app.
 func entitlementLines(plan checker.ClaimPlanPreview) []string {
 	var lines []string
 	for _, ent := range plan.Entitlements {
@@ -173,8 +165,11 @@ func entitlementLines(plan checker.ClaimPlanPreview) []string {
 			continue
 		}
 		line := "· " + ent.ShowName
-		if ent.GrantUnits > 0 {
-			line += fmt.Sprintf(" (%s %s %s)", formatUnits(ent.GrantUnits), ent.UnitType, ent.Period)
+		if quota := checker.QuotaFromEntitlements([]checker.ClaimEntitlement{ent}); quota != nil {
+			line += " · " + quota.AmountShort + " " + quota.AmountWord
+		}
+		if ent.Period != "" {
+			line += " (" + ent.Period + ")"
 		}
 		lines = append(lines, line)
 	}
@@ -192,31 +187,55 @@ func offerDealClaim(fresh []checker.Deal, ctx claimContext, wait bool) {
 	recordPendingClaim(fresh)
 
 	handle := func() {
-		info := buildPopupDealInfo(*deal, ctx)
-		choice := showDealPopup(info)
-		switch choice {
-		case "claim":
-			summary, ok, result := claimDeal(*deal, ctx)
-			if ok {
-				showClaimSuccessUI(*deal, ctx, result, summary)
-			} else {
-				alertBox("ZCode Deal - Chưa nhận được", summary, true)
-			}
-		case "open":
-			logLine(OpenZcode())
-		case "later":
-			logLine("[claim] Bạn chọn để sau. Nhận bất cứ lúc nào bằng: zcode-deal claim")
-			reportActionSafe(ctx, deal.CampaignID, "cancel")
-		default:
-			// "none"/"busy": không có popup hoặc popup khác đang mở,
-			// deal vẫn nằm trong pending-claim.json.
-		}
+		runClaimPopupFlow(*deal, ctx)
 	}
 	if wait {
 		handle()
 		return
 	}
 	go handle()
+}
+
+// runClaimPopupFlow hiện popup nhận deal và xử lý lựa chọn của người
+// dùng (claim + vé thành công / mở ZCode / để sau). Dùng chung cho
+// offer tự động khi có deal mới và menu tray "Có deal mới - ấn xem
+// chi tiết".
+func runClaimPopupFlow(deal checker.Deal, ctx claimContext) {
+	info := buildPopupDealInfo(deal, ctx)
+	choice := showDealPopup(info)
+	switch choice {
+	case "claim":
+		summary, ok, result := claimDeal(deal, ctx)
+		if ok {
+			showClaimSuccessUI(deal, ctx, result, summary)
+		} else {
+			alertBox("ZCode Deal - Chưa nhận được", summary, true)
+		}
+	case "open":
+		logLine(OpenZcode())
+	case "later":
+		logLine("[claim] Bạn chọn để sau. Nhận bất cứ lúc nào bằng: zcode-deal claim")
+		reportActionSafe(ctx, deal.CampaignID, "cancel")
+	default:
+		// "none"/"busy": không có popup hoặc popup khác đang mở,
+		// deal vẫn nằm trong pending-claim.json.
+	}
+}
+
+// dealFromPending dựng lại Deal từ pending-claim.json — dùng cho lệnh
+// claim CLI và menu tray "ấn xem chi tiết" (file này không chứa token).
+func dealFromPending(pending checker.PendingClaim) checker.Deal {
+	return checker.Deal{
+		Key:         pending.Position + ":" + pending.CampaignID,
+		CampaignID:  pending.CampaignID,
+		Position:    pending.Position,
+		Title:       pending.Title,
+		Detail:      pending.Detail,
+		Desc:        pending.Detail,
+		PlanID:      pending.PlanID,
+		ButtonLabel: pending.ButtonLabel,
+		ClaimURL:    pending.ClaimURL,
+	}
 }
 
 // claimDeal thực hiện 1 lần claim theo hành động của người dùng; trả
@@ -393,16 +412,7 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 		fmt.Println("[claim] Deal này không có nút nhận tool claim được — mở ZCode để nhận trong app.")
 		return 1
 	}
-	deal := checker.Deal{
-		Key:         pending.Position + ":" + pending.CampaignID,
-		CampaignID:  pending.CampaignID,
-		Position:    pending.Position,
-		Title:       pending.Title,
-		Detail:      pending.Detail,
-		PlanID:      pending.PlanID,
-		ButtonLabel: pending.ButtonLabel,
-		ClaimURL:    pending.ClaimURL,
-	}
+	deal := dealFromPending(pending)
 	fmt.Print("[claim] Nhận deal này ngay? (y/N): ")
 	answer := readConsoleLine()
 	if strings.TrimSpace(strings.ToLower(answer)) != "y" {

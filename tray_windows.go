@@ -25,6 +25,10 @@ var (
 	trayQuitCh     = make(chan struct{})
 	traySeq        = 0
 	trayOpts       TrayOptions
+	// trayCtx là auth của phiên tray, resolve MỘT lần trong trayOnReady
+	// trước khi các goroutine menu/poll chạy — menu "ấn xem chi tiết"
+	// dùng nó để mở popup nhận deal mà không phải đọc lại credentials.
+	trayCtx claimContext
 )
 
 func requestTrayCheckNow() {
@@ -54,11 +58,31 @@ func trayOnReady() {
 	systray.SetTitle("ZCode Deal Watcher")
 	systray.SetTooltip("ZCode Deal Watcher - đang theo dõi deal")
 
-	mDeal := systray.AddMenuItem("Có deal mới", "Bấm để mở ZCode nhận deal")
+	// Resolve auth ngay khi mở tray để cả poll loop lẫn menu popup
+	// dùng chung một claimContext.
+	config := checker.ConfigDir(trayOpts.ConfigDir)
+	deviceMid, token, authErr := resolveAuth(config)
+	if authErr != nil {
+		logLine(fmt.Sprintf("[gotray] LỖI auth: %v", authErr))
+		systray.SetTooltip("ZCode Deal Watcher - LỖI auth")
+	} else {
+		trayCtx = newClaimContext(token, deviceMid)
+		if token == "" {
+			logLine("[gotray] Lưu ý: không có token, đang check ẩn danh.")
+		}
+	}
+
+	mDeal := systray.AddMenuItem("Có deal mới - ấn xem chi tiết", "Mở popup nhận deal")
 	mDeal.Hide()
+	// Có deal đang chờ (pending-claim.json) thì hiện menu ngay từ đầu
+	// — người dùng có thể mở lại popup mà không đợi deal mới.
+	if _, hasPending := checker.LoadPendingClaim(); hasPending {
+		mDeal.Show()
+	}
 	systray.AddSeparator()
 	mOpen := systray.AddMenuItem("Mở ZCode", "Mở app ZCode")
 	mCheck := systray.AddMenuItem("Kiểm tra ngay", "Kiểm tra deal ngay, không đợi hết chu kỳ")
+	mAuto := systray.AddMenuItemCheckbox(autostartMenuTitle, autostartTooltip, autostartEnabled())
 	mLog := systray.AddMenuItem("Mở log", "Mở file log")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Thoát", "Thoát app tray")
@@ -67,19 +91,49 @@ func trayOnReady() {
 	_ = os.WriteFile(checker.GotrayPidFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
 	logLine(fmt.Sprintf("[gotray] Tray Go đã chạy (PID %d), interval %ds.", os.Getpid(), trayOpts.IntervalSec))
 
-	go trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit)
-	go trayPollLoop(mDeal)
+	go trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit)
+	if authErr == nil {
+		go trayPollLoop(mDeal, token, deviceMid)
+	}
 }
 
-func trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit *systray.MenuItem) {
+// trayShowDealPopup mở lại popup nhận deal cho deal đang chờ (đọc từ
+// pending-claim.json — deal mới nhất tool đã báo). Không có deal chờ
+// thì mở ZCode thay thế.
+func trayShowDealPopup() {
+	pending, ok := checker.LoadPendingClaim()
+	if !ok {
+		logLine("[gotray] Chưa có deal nào đang chờ nhận — mở ZCode thay thế.")
+		logLine(OpenZcode())
+		return
+	}
+	logLine(fmt.Sprintf("[gotray] Mở popup cho deal đang chờ: %s", pending.Position+":"+pending.CampaignID))
+	runClaimPopupFlow(dealFromPending(pending), trayCtx)
+}
+
+func trayHandleMenuClicks(mDeal, mOpen, mCheck, mAuto, mLog, mQuit *systray.MenuItem) {
 	for {
 		select {
 		case <-mDeal.ClickedCh:
-			logLine(OpenZcode())
+			trayShowDealPopup()
 		case <-mOpen.ClickedCh:
 			logLine(OpenZcode())
 		case <-mCheck.ClickedCh:
 			requestTrayCheckNow()
+		case <-mAuto.ClickedCh:
+			// Nguồn sự thật là registry: đọc lại hiện trạng rồi đảo.
+			enable := !autostartEnabled()
+			if err := setAutostart(enable); err != nil {
+				logLine(fmt.Sprintf("[gotray] Không lưu được tuỳ chọn khởi động: %v", err))
+				continue
+			}
+			if enable {
+				mAuto.Check()
+				logLine("[gotray] Đã BẬT khởi động cùng hệ thống (HKCU\\...\\Run → exe tray).")
+			} else {
+				mAuto.Uncheck()
+				logLine("[gotray] Đã TẮT khởi động cùng hệ thống.")
+			}
 		case <-mLog.ClickedCh:
 			if err := openFile(checker.LogFile()); err != nil {
 				logLine(fmt.Sprintf("Không mở được log: %v", err))
@@ -95,18 +149,10 @@ func trayHandleMenuClicks(mDeal, mOpen, mCheck, mLog, mQuit *systray.MenuItem) {
 	}
 }
 
-func trayPollLoop(mDeal *systray.MenuItem) {
-	config := checker.ConfigDir(trayOpts.ConfigDir)
-	deviceMid, token, err := resolveAuth(config)
-	if err != nil {
-		logLine(fmt.Sprintf("[gotray] LỖI auth: %v", err))
-		systray.SetTooltip("ZCode Deal Watcher - LỖI auth")
-		return
-	}
-	if token == "" {
-		logLine("[gotray] Lưu ý: không có token, đang check ẩn danh.")
-	}
-	ctx := newClaimContext(token, deviceMid)
+// trayPollLoop poll marketing/touch liên tục; auth đã resolve trong
+// trayOnReady (thất bại auth thì loop không được khởi động).
+func trayPollLoop(mDeal *systray.MenuItem, token, deviceMid string) {
+	ctx := trayCtx
 	interval := time.Duration(trayOpts.IntervalSec) * time.Second
 	if interval < 300*time.Second {
 		logLine("[gotray] Cảnh báo: interval dưới 300s dễ bị 429.")
@@ -155,7 +201,7 @@ func trayPollLoop(mDeal *systray.MenuItem) {
 			checker.WriteNotifyFile(strings.Join(ids, ","), "ZCode - Có deal mới!", message)
 			systray.SetIcon(iconAlert)
 			systray.SetTooltip("ZCode Deal Watcher - CÓ DEAL MỚI! Bấm \"Nhận deal\" trên popup để nhận.")
-			mDeal.SetTitle("Có deal mới - bấm để mở ZCode")
+			mDeal.SetTitle("Có deal mới - ấn xem chi tiết")
 			mDeal.Show()
 			Notify("ZCode - Có deal mới!", message)
 			// Popup nhận deal: hiện cửa sổ nổi, người dùng bấm

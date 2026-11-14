@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 const version = "2.1.0"
@@ -69,6 +70,8 @@ chỉ chạy khi bạn bấm nút (popup) hoặc gõ y ở lệnh claim.
 `
 
 // parseArgs port hàm parseArgs bản Bun: --key value hoặc --flag.
+// Giá trị chỉ bị coi là flag mới khi bắt đầu bằng "--" (trước đây
+// check thêm len >= 2 làm giá trị 1 ký tự như "--interval 5" bị nuốt).
 func parseArgs(argv []string) (map[string]string, map[string]bool) {
 	args := map[string]string{}
 	bools := map[string]bool{}
@@ -78,7 +81,7 @@ func parseArgs(argv []string) (map[string]string, map[string]bool) {
 			continue
 		}
 		key := arg[2:]
-		if i+1 < len(argv) && len(argv[i+1]) >= 2 && argv[i+1][:2] != "--" {
+		if i+1 < len(argv) && !strings.HasPrefix(argv[i+1], "--") {
 			args[key] = argv[i+1]
 			i++
 		} else {

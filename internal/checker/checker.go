@@ -189,13 +189,13 @@ type Deal struct {
 	Position    string
 	Priority    any
 	Title       string
-	Detail      string // dòng tóm tắt cho toast/log (desc + nhãn nút)
-	Desc        string // mô tả đầy đủ dạng text thuần cho popup
-	PlanID      string // action claim_zcode_plan → plan nhận được
-	ButtonLabel string // nhãn nút nhận, ví dụ "Nhận ngay"
-	ClaimURL    string // action open_url → link mở (nếu không phải claim)
-	HeroSrc     string // URL ảnh banner/hero
-	HeroSHA256  string // sha256 của ảnh (verify fail-closed như app)
+	Detail      string             // dòng tóm tắt cho toast/log (desc + nhãn nút)
+	Desc        string             // mô tả đầy đủ dạng text thuần cho popup
+	PlanID      string             // action claim_zcode_plan → plan nhận được
+	ButtonLabel string             // nhãn nút nhận, ví dụ "Nhận ngay"
+	ClaimURL    string             // action open_url → link mở (nếu không phải claim)
+	HeroSrc     string             // URL ảnh banner/hero
+	HeroSHA256  string             // sha256 của ảnh (verify fail-closed như app)
 	ZcodePlan   *ZcodePlanHeroArgs // args.zcode_plan — dữ liệu vé (số token, hạn)
 }
 

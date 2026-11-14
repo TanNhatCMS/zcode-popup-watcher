@@ -250,7 +250,7 @@ func TestParseSnapshotZcodePlanArgs(t *testing.T) {
 				"entitlements":[{"meter":"model_usage","show_name":"GLM-5.3-Flash","grant_units":300000000,"unit_type":"Tokens"}]
 			}}},
 			"buttons":[{"text":{"content":"Nhận"},"action":{"type":"claim_zcode_plan","args":{"plan_id":"plan-t1"}}}]}
-	]}}`)
+		}]}}`)
 	deals, err := ParseSnapshot(payload)
 	if err != nil {
 		t.Fatalf("ParseSnapshot: %v", err)

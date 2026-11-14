@@ -34,8 +34,8 @@ type ticketState struct {
 // planQuotaView là view nội bộ của popup vé (không phụ thuộc package
 // checker để tránh leak kiểu).
 type planQuotaView struct {
-	Amount string // "300,000,000 Tokens"
-	Model  string // "GLM-5.3-Flash"
+	Amount  string // "300,000,000 Tokens"
+	Model   string // "GLM-5.3-Flash"
 	Benefit string // "GLM-5.3-Flash · 300M Tokens"
 }
 
@@ -104,6 +104,15 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 	state.cardW, state.cardH = cardW, cardH
 	state.sepY = state.cardY + int32(scaleValue(138, dpi))
 
+	// AdjustWindowRect: client size mong muốn (W×H) → outer size cho
+	// CreateWindowExW, tránh caption ăn mất phần đáy (nút bị che).
+	ticketStyle := uintptr(wsCaption | wsSysmenu)
+	adj := rectI{Left: 0, Top: 0, Right: int32(W), Bottom: int32(H)}
+	if r1, _, _ := procAdjustWindowRect.Call(uintptr(unsafe.Pointer(&adj)), ticketStyle, 0); r1 != 0 {
+		W = int(adj.Right - adj.Left)
+		H = int(adj.Bottom - adj.Top)
+	}
+
 	x := (int(screenW) - W) / 2
 	yWin := (int(screenH) - H) / 4
 	if x < 0 {
@@ -116,11 +125,14 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 	className := utf16Ptr("ZCodeDealTicketWnd")
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
+	appIcon, _, _ := procLoadIconW.Call(hInstance, 1)
 
 	wndClass := wndClassExW{
 		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 		LpfnWndProc:   syscall.NewCallback(ticketWndProc(state)),
 		HInstance:     syscall.Handle(hInstance),
+		HIcon:         syscall.Handle(appIcon),
+		HIconSm:       syscall.Handle(appIcon),
 		HCursor:       syscall.Handle(hCursor),
 		HbrBackground: 0,
 		LpszClassName: className,
@@ -308,7 +320,7 @@ func paintTicket(state *ticketState, hdc uintptr, rc rectI) {
 	dashBrush, _, _ := procCreateSolidBrush.Call(uintptr(colSepGrey))
 	for dx := dashFrom; dx < dashTo; dx += int32(scaleValue(10, dpi)) {
 		dashR := rectI{Left: dx, Top: dashY, Right: dx + int32(scaleValue(5, dpi)), Bottom: dashY + 1}
-		procFillRect.Call(hdc, dashBrush, uintptr(unsafe.Pointer(&dashR)))
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&dashR)), dashBrush)
 	}
 	procDeleteObject.Call(dashBrush)
 

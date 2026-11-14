@@ -62,6 +62,18 @@ func QuotaFromEntitlements(ents []ClaimEntitlement) *PlanQuota {
 		raw *= 1_000
 		short = fmt.Sprintf("%dK", int64(best.GrantUnits))
 		word = "Tokens"
+	default:
+		// Unit đã là từ ("Tokens",...): viết tắt số thô cho dòng benefit
+		// giống ảnh app ("GLM-5.3-Flash · 300M Tokens"); số đầy đủ nằm
+		// ở FormatAmount.
+		switch {
+		case raw >= 1_000_000:
+			short = fmt.Sprintf("%dM", raw/1_000_000)
+		case raw >= 1_000:
+			short = fmt.Sprintf("%dK", raw/1_000)
+		default:
+			short = formatComma(raw)
+		}
 	}
 	if word == "" {
 		word = "Tokens"
