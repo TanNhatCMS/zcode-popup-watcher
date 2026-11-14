@@ -193,14 +193,28 @@ type paintStructW struct {
 	RgbReserved [32]byte
 }
 
-// Popup holder: chỉ cho 1 popup tại 1 thời điểm (deal + vé + cài đặt
-// dùng chung) nhưng TỰ PHỤC HỒI — holder theo dõi HWND cửa sổ; nếu
-// cửa sổ đã chết mà chưa nhả (lộ trình thoát nào đó bị lỗi) thì lần
-// acquire kế tiếp chiếm quyền lại thay vì chặn oan mãi.
+// Popup holder TỰ PHỤC HỒI, tách riêng theo LOẠI popup: mỗi loại
+// (deal / vé / cài đặt / thông tin) có holder riêng → mở được ĐỒNG
+// THỜI nhiều popup khác nhau; cùng loại thì vẫn chỉ 1 instance.
+// Holder theo dõi HWND: cửa sổ đã chết mà chưa nhả (lộ trình thoát
+// lỗi) thì lần acquire kế tiếp chiếm quyền lại thay vì chặn oan mãi.
+type popupKind int
+
+const (
+	popupKindDeal popupKind = iota
+	popupKindTicket
+	popupKindSettings
+	popupKindInfo
+)
+
+type popupHolder struct {
+	hwnd     uintptr
+	creating bool
+}
+
 var (
-	popupMu       sync.Mutex
-	popupHwnd     uintptr
-	popupCreating bool
+	popupMu        sync.Mutex
+	popupHolders   = map[popupKind]*popupHolder{}
 )
 
 func isWindow(hwnd uintptr) bool {
@@ -211,37 +225,40 @@ func isWindow(hwnd uintptr) bool {
 	return res != 0
 }
 
-// popupTryAcquire chiếm quyền mở popup; false = đã có popup khác sống.
-func popupTryAcquire() bool {
+// popupTryAcquire chiếm quyền mở 1 loại popup; false = loại đó đang
+// có cửa sổ sống (không mở 2 cửa sổ cùng loại).
+func popupTryAcquire(kind popupKind) bool {
 	popupMu.Lock()
 	defer popupMu.Unlock()
-	if popupCreating {
-		return false
+	h := popupHolders[kind]
+	if h != nil {
+		if h.creating {
+			return false
+		}
+		if isWindow(h.hwnd) {
+			return false
+		}
+		logLine(fmt.Sprintf("[popup] Popup cũ (hwnd %x) đã chết nhưng chưa nhả lock — chiếm quyền lại.", h.hwnd))
 	}
-	if popupHwnd != 0 && isWindow(popupHwnd) {
-		return false
-	}
-	if popupHwnd != 0 {
-		logLine(fmt.Sprintf("[popup] Popup cũ (hwnd %x) đã chết nhưng chưa nhả lock — chiếm quyền lại.", popupHwnd))
-	}
-	popupCreating = true
+	popupHolders[kind] = &popupHolder{creating: true}
 	return true
 }
 
 // popupSetHwnd báo HWND của popup vừa tạo xong.
-func popupSetHwnd(hwnd uintptr) {
+func popupSetHwnd(kind popupKind, hwnd uintptr) {
 	popupMu.Lock()
 	defer popupMu.Unlock()
-	popupCreating = false
-	popupHwnd = hwnd
+	if h := popupHolders[kind]; h != nil {
+		h.hwnd = hwnd
+		h.creating = false
+	}
 }
 
-// popupRelease nhả quyền khi popup đóng/bị hủy.
-func popupRelease() {
+// popupRelease nhả quyền của 1 loại popup khi popup đóng/bị hủy.
+func popupRelease(kind popupKind) {
 	popupMu.Lock()
 	defer popupMu.Unlock()
-	popupCreating = false
-	popupHwnd = 0
+	delete(popupHolders, kind)
 }
 
 func utf16Ptr(s string) *uint16 {
