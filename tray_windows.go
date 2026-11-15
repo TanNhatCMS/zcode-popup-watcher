@@ -72,11 +72,14 @@ func trayOnReady() {
 		}
 	}
 
-	mDeal := systray.AddMenuItem("Có deal mới - ấn xem chi tiết", "Mở popup nhận deal")
+	mDeal := systray.AddMenuItem("Có deal mới - ấn xem chi tiết", "Mở popup nhận deal / xem vé đã nhận")
 	mDeal.Hide()
-	// Có deal đang chờ (pending-claim.json) thì hiện menu ngay từ đầu
-	// — người dùng có thể mở lại popup mà không đợi deal mới.
+	// Hiện menu khi có deal chờ nhận HOẶC đã từng nhận deal (xem lại
+	// vé) — người dùng mở lại popup không cần đợi deal mới.
 	if _, hasPending := checker.LoadPendingClaim(); hasPending {
+		mDeal.Show()
+	} else if _, hasLast := checker.LoadLastClaim(); hasLast {
+		mDeal.SetTitle("Deal đã nhận - ấn xem lại vé")
 		mDeal.Show()
 	}
 	systray.AddSeparator()
@@ -114,15 +117,39 @@ func trayOnReady() {
 // trayShowDealPopup mở lại popup nhận deal cho deal đang chờ (đọc từ
 // pending-claim.json — deal mới nhất tool đã báo). Không có deal chờ
 // thì mở ZCode thay thế.
+// trayShowDealPopup xử lý menu "Có deal mới - ấn xem chi tiết":
+//   - deal đang chờ (pending-claim.json) → popup nhận deal
+//   - đã nhận rồi (last-claim.json) → mở lại vé trắng xem kết quả
+//   - không có gì → thông báo (KHÔNG mở ZCode tự động nữa)
 func trayShowDealPopup() {
-	pending, ok := checker.LoadPendingClaim()
-	if !ok {
-		logLine("[gotray] Chưa có deal nào đang chờ nhận — mở ZCode thay thế.")
-		logLine(OpenZcode())
+	if pending, ok := checker.LoadPendingClaim(); ok {
+		logLine(fmt.Sprintf("[gotray] Mở popup cho deal đang chờ: %s", pending.Position+":"+pending.CampaignID))
+		runClaimPopupFlow(dealFromPending(pending), trayCtx)
 		return
 	}
-	logLine(fmt.Sprintf("[gotray] Mở popup cho deal đang chờ: %s", pending.Position+":"+pending.CampaignID))
-	runClaimPopupFlow(dealFromPending(pending), trayCtx)
+	if last, hasLast := checker.LoadLastClaim(); hasLast {
+		logLine(fmt.Sprintf("[gotray] Xem lại vé deal đã nhận lúc %s.", last.ClaimedAt))
+		showClaimSuccessPopup(ticketFromLastClaim(last))
+		return
+	}
+	logLine("[gotray] Chưa có deal nào đang chờ hoặc đã nhận.")
+	alertBox("ZCode Deal", "Chưa có deal nào đang chờ nhận.\nBấm \"Kiểm tra ngay\" để kiểm tra deal mới.", false)
+}
+
+// ticketFromLastClaim dựng lại ticketInfo từ bản ghi last-claim để
+// mở lại vé đã nhận.
+func ticketFromLastClaim(last checker.LastClaim) ticketInfo {
+	return ticketInfo{
+		PlanName: last.PlanName,
+		Quota: &checker.PlanQuota{
+			AmountRaw:   last.AmountRaw,
+			AmountWord:  last.AmountWord,
+			AmountShort: last.AmountShort,
+			Model:       last.Model,
+		},
+		EndsAt:  last.EndsAt,
+		Account: last.Account,
+	}
 }
 
 func trayHandleMenuClicks(mDeal, mOpen, mCheck, mQuit *systray.MenuItem) {

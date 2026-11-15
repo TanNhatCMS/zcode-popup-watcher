@@ -293,7 +293,7 @@ func TestDealSettingsLoadSave(t *testing.T) {
 		t.Fatalf("parse settings sai: %+v", loaded)
 	}
 	def := DefaultDealSettings()
-	if def.CheckAccount != "default" || !def.CheckWindowEnabled || def.CheckFrom != "17:55" {
+	if def.CheckAccount != "default" || !def.CheckWindowEnabled || def.CheckFrom != "18:00" || def.CheckTo != "23:00" {
 		t.Fatalf("default sai: %+v", def)
 	}
 }
@@ -310,15 +310,44 @@ func TestCockpitParse(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "zcode_accounts.json"), index, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeAcc := func(id, jwt string) {
+	// Key file: 32-byte key base64 (giống secure-account-storage.key).
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	keyB64 := base64.StdEncoding.EncodeToString(key)
+	if err := os.WriteFile(filepath.Join(dir, "secure-account-storage.key"), []byte(keyB64), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Ghi 2 account: acc-1 dạng ENVELOPE mã hóa (đúng format cockpit),
+	// acc-2 legacy plaintext không JWT (phải bị bỏ qua).
+	writeAccEncrypted := func(t *testing.T, path, id, jwt string) {
 		t.Helper()
-		body := []byte(`{"id":"` + id + `","email":"` + id + `@example.com","display_name":"Người ` + id + `","plan_type":"GLM Start","zcode_jwt_token":"` + jwt + `"}`)
-		if err := os.WriteFile(filepath.Join(dir, "zcode_accounts", id+".json"), body, 0o644); err != nil {
+		plain := []byte(`{"id":"` + id + `","email":"` + id + `@example.com","display_name":"Người ` + id + `","plan_type":"GLM Start","zcode_jwt_token":"` + jwt + `"}`)
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonce := make([]byte, 12)
+		if _, err := rand.Read(nonce); err != nil {
+			t.Fatal(err)
+		}
+		sealed := gcm.Seal(nil, nonce, plain, nil)
+		env := fmt.Sprintf(`{"version":1,"kind":"zcode","algorithm":"AES-256-GCM","key_id":"local-secure-account-storage-v1","nonce":"%s","ciphertext":"%s","encrypted_at":1793000000}`,
+			base64.StdEncoding.EncodeToString(nonce), base64.StdEncoding.EncodeToString(sealed))
+		if err := os.WriteFile(path, []byte(env), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writeAcc("acc-1", "jwt-a")
-	writeAcc("acc-2", "") // không có JWT — phải bị bỏ qua
+	writeAccEncrypted(t, filepath.Join(dir, "zcode_accounts", "acc-1.json"), "acc-1", "jwt-a")
+	// acc-2: plaintext legacy không JWT — passthrough rồi bị bỏ qua.
+	if err := os.WriteFile(filepath.Join(dir, "zcode_accounts", "acc-2.json"), []byte(`{"id":"acc-2","email":"b@example.com"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("COCKPIT_TOOLS_DATA_DIR", dir)
 	t.Setenv("COCKPIT_TOOLS_PROFILE", "")

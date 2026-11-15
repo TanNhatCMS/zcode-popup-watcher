@@ -50,8 +50,8 @@ var (
 	procGetDC               = user32.NewProc("GetDC")
 	procReleaseDC           = user32.NewProc("ReleaseDC")
 	procAdjustWindowRect    = user32.NewProc("AdjustWindowRect")
-	procMoveToEx            = user32.NewProc("MoveToEx")
-	procLineTo              = user32.NewProc("LineTo")
+	procMoveToEx            = gdi32.NewProc("MoveToEx")
+	procLineTo              = gdi32.NewProc("LineTo")
 	procInvalidateRect      = user32.NewProc("InvalidateRect")
 	procIsWindow            = user32.NewProc("IsWindow")
 	procSetBkMode           = gdi32.NewProc("SetBkMode")
@@ -213,8 +213,8 @@ type popupHolder struct {
 }
 
 var (
-	popupMu        sync.Mutex
-	popupHolders   = map[popupKind]*popupHolder{}
+	popupMu      sync.Mutex
+	popupHolders = map[popupKind]*popupHolder{}
 )
 
 func isWindow(hwnd uintptr) bool {
@@ -259,6 +259,71 @@ func popupRelease(kind popupKind) {
 	popupMu.Lock()
 	defer popupMu.Unlock()
 	delete(popupHolders, kind)
+}
+
+// WndProc dispatch: MỖI LỚP cửa sổ popup chỉ đăng ký MỘT LẦN mỗi
+// tiến trình (RegisterClassExW trùng tên → lỗi "Class already exists"
+// khi mở lần 2), nên callback là 1 dispatcher DUY NHẤT tra handler
+// theo HWND — state của từng lần mở không đóng vào callback.
+type wndHandler = func(syscall.Handle, uint32, uintptr, uintptr) uintptr
+
+var (
+	wndMu                    sync.Mutex
+	wndHandlers              = map[uintptr]wndHandler{}
+	registeredPopupClasses   = map[string]bool{}
+	popupWndDispatchCallback = syscall.NewCallback(popupWndDispatch)
+)
+
+// popupWndDispatch tra handler theo hwnd; chưa có handler (WM_CREATE
+// và các message trước khi gắn) → DefWindowProc.
+func popupWndDispatch(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+	wndMu.Lock()
+	handler := wndHandlers[uintptr(hwnd)]
+	wndMu.Unlock()
+	if handler == nil {
+		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
+		return ret
+	}
+	return handler(hwnd, msg, wParam, lParam)
+}
+
+// registerPopupClass đăng ký 1 lớp cửa sổ popup MỘT LẦN mỗi tiến trình.
+func registerPopupClass(name string, hInstance, appIcon, hCursor uintptr) error {
+	wndMu.Lock()
+	defer wndMu.Unlock()
+	if registeredPopupClasses[name] {
+		return nil
+	}
+	className := utf16Ptr(name)
+	wndClass := wndClassExW{
+		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
+		LpfnWndProc:   popupWndDispatchCallback,
+		HInstance:     syscall.Handle(hInstance),
+		HIcon:         syscall.Handle(appIcon),
+		HIconSm:       syscall.Handle(appIcon),
+		HCursor:       syscall.Handle(hCursor),
+		HbrBackground: 0,
+		LpszClassName: className,
+	}
+	if ret, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass))); ret == 0 {
+		return fmt.Errorf("RegisterClassExW: %w", err)
+	}
+	registeredPopupClasses[name] = true
+	return nil
+}
+
+// popupSetHandler gắn handler của cửa sổ vừa tạo (tra theo hwnd).
+func popupSetHandler(hwnd uintptr, handler wndHandler) {
+	wndMu.Lock()
+	defer wndMu.Unlock()
+	wndHandlers[uintptr(hwnd)] = handler
+}
+
+// popupDeleteHandler gỡ handler khi cửa sổ đóng.
+func popupDeleteHandler(hwnd uintptr) {
+	wndMu.Lock()
+	defer wndMu.Unlock()
+	delete(wndHandlers, hwnd)
 }
 
 func utf16Ptr(s string) *uint16 {
@@ -352,10 +417,10 @@ func fillRectColor(hdc uintptr, rect rectI, color uint32) {
 // chọn. Kết quả kèm chỉ số tài khoản đã chọn trong combobox (0 = mặc
 // định): "claim" / "later" / "open" / "none" / "busy".
 func showDealPopup(info popupDealInfo) popupChoice {
-	if !popupTryAcquire() {
+	if !popupTryAcquire(popupKindDeal) {
 		return popupChoice{Choice: "busy"}
 	}
-	defer popupRelease()
+	defer popupRelease(popupKindDeal)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -524,30 +589,21 @@ func runPopupWindow(info popupDealInfo, resultCh chan popupChoice) error {
 		yWin = 0
 	}
 
-	className := utf16Ptr("ZCodeDealPopupWnd")
+	className := "ZCodeDealPopupWnd"
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	// Icon app nhúng qua rsrc_windows_amd64.syso (resource ID 1) —
 	// hiện trên title bar của popup; thiếu resource thì về icon mặc định.
 	appIcon, _, _ := procLoadIconW.Call(hInstance, 1)
 
-	wndClass := wndClassExW{
-		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		LpfnWndProc:   syscall.NewCallback(popupWndProc(state)),
-		HInstance:     syscall.Handle(hInstance),
-		HIcon:         syscall.Handle(appIcon),
-		HIconSm:       syscall.Handle(appIcon),
-		HCursor:       syscall.Handle(hCursor),
-		HbrBackground: 0, // tự vẽ nền tối trong WM_ERASEBKGND/WM_PAINT
-		LpszClassName: className,
-	}
-	if ret, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass))); ret == 0 {
-		return fmt.Errorf("RegisterClassExW: %w", err)
+	// Class đăng ký MỘT LẦN mỗi tiến trình; handler gắn theo hwnd.
+	if err := registerPopupClass(className, hInstance, appIcon, hCursor); err != nil {
+		return err
 	}
 
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(wsExTopmost),
-		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(utf16Ptr(className))),
 		uintptr(unsafe.Pointer(utf16Ptr("ZCode Deal"))),
 		uintptr(wsCaption|wsSysmenu|wsMinimizebox),
 		uintptr(int32(x)), uintptr(int32(yWin)), uintptr(uint32(W)), uintptr(uint32(H)),
@@ -556,7 +612,9 @@ func runPopupWindow(info popupDealInfo, resultCh chan popupChoice) error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
-	popupSetHwnd(hwnd)
+	popupSetHwnd(popupKindDeal, hwnd)
+	popupSetHandler(hwnd, popupWndProc(state))
+	defer popupDeleteHandler(hwnd)
 
 	fontButton := newUIFont(dpi, 400, -14)
 	defer fontButton.release()

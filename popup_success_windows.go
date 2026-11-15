@@ -43,10 +43,10 @@ type planQuotaView struct {
 // showClaimSuccessPopup mở vé nhận deal thành công, BLOCK tới khi
 // người dùng bấm: "ok" (Đã hiểu) / "share" (Chia sẻ) / "none".
 func showClaimSuccessPopup(info ticketInfo) string {
-	if !popupTryAcquire() {
+	if !popupTryAcquire(popupKindTicket) {
 		return "busy"
 	}
-	defer popupRelease()
+	defer popupRelease(popupKindTicket)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -124,28 +124,19 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 		yWin = 0
 	}
 
-	className := utf16Ptr("ZCodeDealTicketWnd")
+	className := "ZCodeDealTicketWnd"
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	appIcon, _, _ := procLoadIconW.Call(hInstance, 1)
 
-	wndClass := wndClassExW{
-		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		LpfnWndProc:   syscall.NewCallback(ticketWndProc(state)),
-		HInstance:     syscall.Handle(hInstance),
-		HIcon:         syscall.Handle(appIcon),
-		HIconSm:       syscall.Handle(appIcon),
-		HCursor:       syscall.Handle(hCursor),
-		HbrBackground: 0,
-		LpszClassName: className,
-	}
-	if ret, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass))); ret == 0 {
-		return fmt.Errorf("RegisterClassExW: %w", err)
+	// Class đăng ký MỘT LẦN mỗi tiến trình; handler gắn theo hwnd.
+	if err := registerPopupClass(className, hInstance, appIcon, hCursor); err != nil {
+		return err
 	}
 
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(wsExTopmost),
-		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(utf16Ptr(className))),
 		uintptr(unsafe.Pointer(utf16Ptr("ZCode Deal - Nhận thành công"))),
 		uintptr(wsCaption|wsSysmenu),
 		uintptr(int32(x)), uintptr(int32(yWin)), uintptr(uint32(W)), uintptr(uint32(H)),
@@ -154,6 +145,9 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
+	popupSetHwnd(popupKindTicket, hwnd)
+	popupSetHandler(hwnd, ticketWndHandler(state))
+	defer popupDeleteHandler(hwnd)
 
 	fontButton := newUIFont(dpi, 400, -14)
 	defer fontButton.release()
@@ -180,7 +174,7 @@ func runTicketWindow(info ticketInfo, resultCh chan string) error {
 	return nil
 }
 
-func ticketWndProc(state *ticketState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+func ticketWndHandler(state *ticketState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 	return func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		switch msg {
 		case wmCommand:

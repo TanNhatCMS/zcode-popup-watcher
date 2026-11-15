@@ -68,11 +68,11 @@ type settingsState struct {
 // đóng. Bấm "Lưu cài đặt" ghi settings + registry autostart ngay —
 // poll loop nạp lại mỗi vòng nên có hiệu lực tức thì.
 func showCheckSettingsWindow() {
-	if !popupTryAcquire() {
+	if !popupTryAcquire(popupKindSettings) {
 		alertBox("ZCode Deal", "Có popup khác đang mở — đóng nó rồi thử lại.", true)
 		return
 	}
-	defer popupRelease()
+	defer popupRelease(popupKindSettings)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -138,23 +138,14 @@ func runSettingsWindow(done chan struct{}) error {
 	add("Tài khoản check deal:", fontBody, colTextGrey, 214, 20)
 	add("Tần suất check:", fontBody, colTextGrey, 278, 20)
 
-	className := utf16Ptr("ZCodeDealSettingsWnd")
+	className := "ZCodeDealSettingsWnd"
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	appIcon, _, _ := procLoadIconW.Call(hInstance, 1)
 
-	wndClass := wndClassExW{
-		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		LpfnWndProc:   syscall.NewCallback(settingsWndProc(state)),
-		HInstance:     syscall.Handle(hInstance),
-		HIcon:         syscall.Handle(appIcon),
-		HIconSm:       syscall.Handle(appIcon),
-		HCursor:       syscall.Handle(hCursor),
-		HbrBackground: 0,
-		LpszClassName: className,
-	}
-	if ret, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass))); ret == 0 {
-		return fmt.Errorf("RegisterClassExW: %w", err)
+	// Class đăng ký MỘT LẦN mỗi tiến trình; handler gắn theo hwnd.
+	if err := registerPopupClass(className, hInstance, appIcon, hCursor); err != nil {
+		return err
 	}
 
 	// Client size mong muốn → outer size cho CreateWindowExW.
@@ -175,7 +166,7 @@ func runSettingsWindow(done chan struct{}) error {
 
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(wsExTopmost),
-		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(utf16Ptr(className))),
 		uintptr(unsafe.Pointer(utf16Ptr("ZCode Deal - Cài đặt"))),
 		style,
 		uintptr(int32(x)), uintptr(int32(yWin)), uintptr(uint32(W)), uintptr(uint32(H)),
@@ -184,7 +175,9 @@ func runSettingsWindow(done chan struct{}) error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
-	popupSetHwnd(hwnd)
+	popupSetHwnd(popupKindSettings, hwnd)
+	popupSetHandler(hwnd, settingsWndHandler(state))
+	defer popupDeleteHandler(hwnd)
 
 	cw := W - 2*margins
 
@@ -319,7 +312,7 @@ func strokeLine(hdc uintptr, x0, y0, x1, y1 int) {
 	procLineTo.Call(hdc, uintptr(int32(x1)), uintptr(int32(y1)))
 }
 
-func settingsWndProc(state *settingsState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+func settingsWndHandler(state *settingsState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 	return func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		switch msg {
 		case wmCommand:
@@ -330,7 +323,10 @@ func settingsWndProc(state *settingsState) func(hwnd syscall.Handle, msg uint32,
 			}
 		case wmLButtonUp:
 			// Hit-test các dòng checkbox tự vẽ → toggle + vẽ lại.
-			x := int(int16(wParam & 0xFFFF))
+			// Tọa độ chuột nằm trong lParam (client px): low word = x,
+			// high word = y — wParam là flags phím, KHÔNG phải tọa độ
+			// (đọc wParam là bug "không tick được").
+			x := int(int16(lParam & 0xFFFF))
 			y := int(int16((lParam >> 16) & 0xFFFF))
 			toggled := false
 			for i := range state.rows {

@@ -32,8 +32,8 @@ type DealSettings struct {
 }
 
 const (
-	defaultCheckFrom    = "17:55"
-	defaultCheckTo      = "22:10"
+	defaultCheckFrom    = "18:00"
+	defaultCheckTo      = "23:00"
 	checkAccountDefault = "default"
 )
 

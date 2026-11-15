@@ -304,9 +304,9 @@ func runClaimPopupFlow(deal checker.Deal, ctx claimContext) {
 		if idx := res.AccountIdx; idx > 0 && idx < len(info.Accounts) {
 			target = ctxForAccount(ctx, info.Accounts[idx].Token)
 		}
-		summary, ok, result := claimDeal(deal, target)
+		summary, ok, _, info := claimDeal(deal, target)
 		if ok {
-			showClaimSuccessUI(deal, target, result)
+			showClaimSuccessUI(info)
 		} else {
 			alertBox("ZCode Deal - Chưa nhận được", summary, true)
 		}
@@ -342,27 +342,27 @@ func dealFromPending(pending checker.PendingClaim) checker.Deal {
 // Caller chịu trách nhiệm hiển thị: popup dùng vé thành công, CLI in
 // console — claimDeal không tự mở MessageBox để không chặn tiến trình
 // chạy không đầu cuối.
-func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.ClaimResult) {
+func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.ClaimResult, ticketInfo) {
 	if ctx.token == "" {
 		logLine("[claim] Không claim được: chưa có token đăng nhập.")
-		return "Chưa có token đăng nhập trong ~/.zcode/v2.\nMở ZCode, đăng nhập rồi chạy lại tool.", false, checker.ClaimResult{}
+		return "Chưa có token đăng nhập trong ~/.zcode/v2.\nMở ZCode, đăng nhập rồi chạy lại tool.", false, checker.ClaimResult{}, ticketInfo{}
 	}
 	// Deal dạng link (open_url): mở link thay vì gọi API.
 	if deal.PlanID == "" && deal.ClaimURL != "" {
 		logLine("[claim] Deal là link nhận: " + deal.ClaimURL)
 		if err := openURL(deal.ClaimURL); err != nil {
 			logLine(fmt.Sprintf("[claim] Không mở được link: %v", err))
-			return fmt.Sprintf("Không mở được link nhận deal: %v", err), false, checker.ClaimResult{}
+			return fmt.Sprintf("Không mở được link nhận deal: %v", err), false, checker.ClaimResult{}, ticketInfo{}
 		}
 		reportActionSafe(ctx, deal.CampaignID, "confirm")
 		logLine("[claim] Đã mở link nhận deal.")
-		return "Đã mở link nhận deal:\n" + deal.ClaimURL, true, checker.ClaimResult{}
+		return "Đã mở link nhận deal:\n" + deal.ClaimURL, true, checker.ClaimResult{}, ticketInfo{}
 	}
 	logLine(fmt.Sprintf("[claim] Đang nhận deal %s (plan %s) theo lệnh của bạn...", deal.Key, deal.PlanID))
 	result, err := checker.ClaimPlan(ctx.token, deal.PlanID, ctx.appVersion)
 	if err != nil {
 		logLine(fmt.Sprintf("[claim] LỖI claim: %v", err))
-		return fmt.Sprintf("Không nhận được deal: %v", err), false, result
+		return fmt.Sprintf("Không nhận được deal: %v", err), false, result, ticketInfo{}
 	}
 	if !result.Success {
 		message := result.Message
@@ -370,21 +370,23 @@ func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.Claim
 			message = fmt.Sprintf("Server từ chối yêu cầu nhận (code %d).", result.Code)
 		}
 		logLine(fmt.Sprintf("[claim] Server từ chối (code %d): %s", result.Code, message))
-		return message, false, result
+		return message, false, result, ticketInfo{}
 	}
 	// Claim thành công — giống app gốc: report confirm sau khi nhận.
 	checker.ClearPendingClaim()
 	reportActionSafe(ctx, deal.CampaignID, "confirm")
+	// Lưu vé lần nhận gần nhất (menu "ấn xem chi tiết" mở lại được).
+	info := buildTicketInfo(deal, ctx, result)
+	saveLastClaimFromTicket(info)
 	summary := planSummary(result)
 	logLine("[claim] Nhận deal THÀNH CÔNG: " + strings.ReplaceAll(summary, "\n", " | "))
-	return summary, true, result
+	return summary, true, result, info
 }
 
-// showClaimSuccessUI hiện popup vé "nhận thành công" (Windows, ảnh 2
-// của app) từ dữ liệu claim: quota từ args.zcode_plan của deal (ưu
-// tiên) hoặc billing/preview, ends_at từ response claim. Non-Windows
-// chỉ log (đã in trong claimDeal).
-func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.ClaimResult) {
+// buildTicketInfo gom dữ liệu vé sau khi claim: quota từ
+// args.zcode_plan của deal (ưu tiên — nguồn app gốc dùng để vẽ vé)
+// hoặc billing/preview; ends_at từ response claim.
+func buildTicketInfo(deal checker.Deal, ctx claimContext, result checker.ClaimResult) ticketInfo {
 	info := ticketInfo{
 		PlanName: result.Plan.Name,
 		EndsAt:   result.EndsAt,
@@ -409,6 +411,37 @@ func showClaimSuccessUI(deal checker.Deal, ctx claimContext, result checker.Clai
 	if info.Quota == nil && len(result.Plan.Entitlements) > 0 {
 		info.Quota = checker.QuotaFromEntitlements(result.Plan.Entitlements)
 	}
+	return info
+}
+
+// lastClaimFromTicket chuyển ticketInfo thành bản ghi last-claim.
+func lastClaimFromTicket(info ticketInfo) checker.LastClaim {
+	l := checker.LastClaim{
+		PlanName:  info.PlanName,
+		Account:   info.Account,
+		EndsAt:    info.EndsAt,
+		ClaimedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if info.Quota != nil {
+		l.AmountRaw = info.Quota.AmountRaw
+		l.AmountWord = info.Quota.AmountWord
+		l.AmountShort = info.Quota.AmountShort
+		l.Model = info.Quota.Model
+	}
+	return l
+}
+
+// saveLastClaimFromTicket lưu vé vào last-claim.json để menu tray mở
+// lại được sau này.
+func saveLastClaimFromTicket(info ticketInfo) {
+	if err := checker.SaveLastClaim(lastClaimFromTicket(info)); err != nil {
+		logLine(fmt.Sprintf("[claim] Không lưu được vé đã nhận: %v", err))
+	}
+}
+
+// showClaimSuccessUI hiện popup vé "nhận thành công" (Windows, ảnh 2
+// của app). Non-Windows chỉ log (đã in trong claimDeal).
+func showClaimSuccessUI(info ticketInfo) {
 	showClaimSuccessPopup(info)
 }
 
@@ -526,7 +559,7 @@ func runClaim(args map[string]string, bools map[string]bool) int {
 		fmt.Println("[claim] Đã hủy. Deal vẫn giữ trong pending-claim.json, chạy lại `zcode-deal claim` khi muốn nhận.")
 		return 0
 	}
-	summary, ok, result := claimDeal(deal, ctx)
+	summary, ok, result, _ := claimDeal(deal, ctx)
 	if ok {
 		fmt.Println("[claim] NHẬN THÀNH CÔNG:")
 		fmt.Println(summary)

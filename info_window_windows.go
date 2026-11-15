@@ -35,11 +35,11 @@ type infoState struct {
 
 // showInfoWindow mở popup thông tin, BLOCK đến khi đóng.
 func showInfoWindow() {
-	if !popupTryAcquire() {
+	if !popupTryAcquire(popupKindInfo) {
 		alertBox("ZCode Deal", "Có popup khác đang mở — đóng nó rồi thử lại.", true)
 		return
 	}
-	defer popupRelease()
+	defer popupRelease(popupKindInfo)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -101,23 +101,14 @@ func runInfoWindow(done chan struct{}) error {
 	add("Theo dõi deal ZCode — popup nhận deal khi bạn bấm.", fontBody, colTextGrey, 94, 22, true)
 	add("Tác giả: TanNhatCMS · MIT © 2026", fontSmall, colTextGrey, 120, 20, true)
 
-	className := utf16Ptr("ZCodeDealInfoWnd")
+	className := "ZCodeDealInfoWnd"
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	appIcon, _, _ := procLoadIconW.Call(hInstance, 1)
 
-	wndClass := wndClassExW{
-		CbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		LpfnWndProc:   syscall.NewCallback(infoWndProc(state)),
-		HInstance:     syscall.Handle(hInstance),
-		HIcon:         syscall.Handle(appIcon),
-		HIconSm:       syscall.Handle(appIcon),
-		HCursor:       syscall.Handle(hCursor),
-		HbrBackground: 0,
-		LpszClassName: className,
-	}
-	if ret, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass))); ret == 0 {
-		return fmt.Errorf("RegisterClassExW: %w", err)
+	// Class đăng ký MỘT LẦN mỗi tiến trình; handler gắn theo hwnd.
+	if err := registerPopupClass(className, hInstance, appIcon, hCursor); err != nil {
+		return err
 	}
 
 	style := uintptr(wsCaption | wsSysmenu | wsMinimizebox)
@@ -137,7 +128,7 @@ func runInfoWindow(done chan struct{}) error {
 
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(wsExTopmost),
-		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(utf16Ptr(className))),
 		uintptr(unsafe.Pointer(utf16Ptr("ZCode Deal - Thông tin"))),
 		style,
 		uintptr(int32(x)), uintptr(int32(yWin)), uintptr(uint32(W)), uintptr(uint32(H)),
@@ -146,7 +137,9 @@ func runInfoWindow(done chan struct{}) error {
 	if hwnd == 0 {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
-	popupSetHwnd(hwnd)
+	popupSetHwnd(popupKindInfo, hwnd)
+	popupSetHandler(hwnd, infoWndHandler(state))
+	defer popupDeleteHandler(hwnd)
 
 	btnW := scaleValue(130, dpi)
 	btnH := scaleValue(34, dpi)
@@ -176,7 +169,7 @@ func runInfoWindow(done chan struct{}) error {
 	return nil
 }
 
-func infoWndProc(state *infoState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+func infoWndHandler(state *infoState) func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 	return func(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		switch msg {
 		case wmCommand:
