@@ -32,7 +32,7 @@ Lệnh:
       đầy đủ, quyền lợi thật của plan, chọn tài khoản nhận) — bấm
       "Nhận deal" tool mới claim giúp bạn.
       Tài khoản check: --account đè settings; khung giờ mặc định
-      17:55-22:10 giờ VN — NGOÀI khung giờ KHÔNG gọi API (chỉ ngủ
+      18:00-23:00 giờ VN — NGOÀI khung giờ KHÔNG gọi API (chỉ ngủ
       chờ), tắt bằng --no-window hoặc bỏ tick trong menu tray.
   watch [tùy chọn như check]
       Giống check (poll liên tục).
@@ -53,7 +53,7 @@ Lệnh:
   stop
       Dừng daemon (app tray thoát bằng menu Thoát trong tray).
   reminder [--from HH:MM] [--to HH:MM] [--open]
-      Nhắc theo khung giờ deal đêm (mặc định 17:55-22:10 giờ VN),
+      Nhắc theo khung giờ deal đêm (mặc định 18:00-23:00 giờ VN),
       1 lần/ngày, không gọi API.
   reminder --test
       Báo ngay để xem thử, không đợi khung giờ.

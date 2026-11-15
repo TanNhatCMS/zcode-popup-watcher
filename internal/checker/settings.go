@@ -7,7 +7,7 @@
 //	check_window_enabled — true: NGOÀI khung giờ KHÔNG gọi API check
 //	                      (deal đêm thường phát ~18h); chỉ ngủ chờ.
 //	check_from/check_to  — khung giờ HH:MM theo giờ VN, mặc định
-//	                      17:55–22:10 (khớp reminder).
+//	                      18:00–23:00 (deal đêm thường phát 18h).
 //
 // Sửa từ menu tray (hoặc sửa file) có hiệu lực ngay vòng poll kế
 // tiếp — poll loop nạp lại settings mỗi vòng, không cần restart.
@@ -38,7 +38,7 @@ const (
 )
 
 // DefaultDealSettings trả bộ giá trị mặc định: check bằng tài khoản
-// đang login ZCode, chỉ check trong khung 17:55–22:10 giờ VN.
+// đang login ZCode, chỉ check trong khung 18:00–23:00 giờ VN.
 func DefaultDealSettings() DealSettings {
 	return DealSettings{
 		CheckAccount:       checkAccountDefault,

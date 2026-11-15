@@ -70,16 +70,16 @@ func vnClockLabel() string {
 }
 
 // runReminder port popup-watcher.ts: không gọi API, không đọc token.
-// Den khung giờ deal đêm (mặc định 17:55-22:10 giờ VN) thì báo
+// Den khung giờ deal đêm (mặc định 18:00-23:00 giờ VN) thì báo
 // 1 lần/ngày. --test báo ngay không đợi khung giờ.
 func runReminder(args map[string]string, bools map[string]bool) int {
 	fromStr := args["from"]
 	if fromStr == "" {
-		fromStr = "17:55"
+		fromStr = "18:00"
 	}
 	toStr := args["to"]
 	if toStr == "" {
-		toStr = "22:10"
+		toStr = "23:00"
 	}
 	fromMinutes := toMinutes(fromStr)
 	toMinutesValue := toMinutes(toStr)

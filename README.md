@@ -81,8 +81,8 @@ Tùy chọn chung cho `check`/`watch`/`tray`:
 `--no-popup` (không hiện popup; deal nhận được vẫn lưu để
 `zcode-deal claim` dùng được).
 `check` thêm: `--once`, `--dry-run`, `--self-test`.
-`reminder` thêm: `--from HH:MM` (mặc định 17:55), `--to HH:MM`
-(mặc định 22:10, giờ VN), `--open`, `--test`.
+`reminder` thêm: `--from HH:MM` (mặc định 18:00), `--to HH:MM`
+(mặc định 23:00, giờ VN), `--open`, `--test`.
 
 Biến môi trường tùy chọn: `ZCODE_DATA_BASE_DIR` (đổi thư mục gốc thay
 cho `$HOME`), `ZCODE_JWT_TOKEN` (ghi đè token, ưu tiên hơn
