@@ -362,6 +362,11 @@ func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.Claim
 	result, err := checker.ClaimPlan(ctx.token, deal.PlanID, ctx.appVersion)
 	if err != nil {
 		logLine(fmt.Sprintf("[claim] LỖI claim: %v", err))
+		// Uncertain: request đã gửi nhưng mất response — deal CÓ THỂ đã
+		// nhận thành công ở server. KHÔNG tự retry (double claim).
+		if result.Uncertain {
+			return "Không nhận được phản hồi sau khi gửi yêu cầu nhận (EOF/WAF).\nDeal CÓ THỂ đã nhận thành công ở server — bấm \"Kiểm tra ngay\" hoặc mở ZCode để kiểm tra trước khi thử lại.", false, result, ticketInfo{}
+		}
 		return fmt.Sprintf("Không nhận được deal: %v", err), false, result, ticketInfo{}
 	}
 	if !result.Success {
@@ -369,8 +374,14 @@ func claimDeal(deal checker.Deal, ctx claimContext) (string, bool, checker.Claim
 		if message == "" {
 			message = fmt.Sprintf("Server từ chối yêu cầu nhận (code %d).", result.Code)
 		}
+		// 3007: gateway security từ chối — thường xảy ra khi vừa gặp mất
+		// phản hồi rồi thử lại (double claim). Cảnh báo rõ.
+		hint := ""
+		if result.Code == 3007 {
+			hint = "\n\nNếu trước đó vừa thử nhận và mất phản hồi thì deal CÓ THỂ đã nhận ở lần trước — kiểm tra lại trên ZCode trước khi thử tiếp."
+		}
 		logLine(fmt.Sprintf("[claim] Server từ chối (code %d): %s", result.Code, message))
-		return message, false, result, ticketInfo{}
+		return message + hint, false, result, ticketInfo{}
 	}
 	// Claim thành công — giống app gốc: report confirm sau khi nhận.
 	checker.ClearPendingClaim()

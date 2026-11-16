@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -63,17 +64,40 @@ func clientPlatformKey() string {
 	return platform + "-" + arch
 }
 
-// authHeaders dựng header chung cho marketing/touch (GET lẫn POST).
+// authHeaders dựng header đầy đủ cho mọi request tới zcode endpoint:
+// bộ source headers 11 mục mà ApiClient của app gốc inject (thiếu bộ này
+// là gateway drop connection → EOF, hoặc security check 3007 với
+// billing) + Authorization khi có token.
 func authHeaders(token, deviceMid, locale, appVersion string) map[string]string {
-	headers := map[string]string{
-		"X-Device-Mid":        deviceMid,
-		"X-Client-Language":   locale,
-		"X-ZCode-App-Version": appVersion,
-	}
+	headers := buildZCodeSourceHeaders(SourceHeaderOptions{
+		AppVersion:     appVersion,
+		DeviceMid:      deviceMid,
+		ClientLanguage: locale,
+	})
 	if token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
 	return headers
+}
+
+// readResponseBody đọc toàn bộ response; body rỗng là lỗi rõ ràng
+// (EOF khi decode) — gateway/WAF thỉnh thoảng chặn billing endpoint.
+func readResponseBody(resp *http.Response, what string) ([]byte, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 160 {
+			snippet = snippet[:160]
+		}
+		return nil, fmt.Errorf("HTTP %d từ %s (Content-Type: %s) %s", resp.StatusCode, resp.Header.Get("Content-Type"), what, snippet)
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("phản hồi rỗng (0 bytes) từ %s — gateway/WAF có thể đã chặn, thử lại sau", what)
+	}
+	return body, nil
 }
 
 // ReportTouchAction báo hành động của người dùng về server, giống
@@ -148,18 +172,27 @@ func PreviewClaimPlans(token, appVersion string) ([]ClaimPlanPreview, error) {
 	u := marketingEndpoint("/api/v1/zcode-plan/billing/preview") +
 		"?app_version=" + url.QueryEscape(appVersion) +
 		"&platform=" + url.QueryEscape(clientPlatformKey())
-	req, err := http.NewRequest(http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Authorization":       "Bearer " + token,
+		"X-ZCode-App-Version": appVersion,
+		"X-Platform":          clientPlatformKey(),
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-ZCode-App-Version", appVersion)
-	req.Header.Set("X-Platform", clientPlatformKey())
-	resp, err := apiHTTPClient.Do(req)
-	if err != nil {
-		return nil, err
+	// GET idempotent → retry 3 lần với backoff khi gateway drop response
+	// (EOF/rỗng) — bug thật gặp trên billing endpoint 2026-11-16.
+	var body []byte
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 700 * time.Millisecond)
+		}
+		body, lastErr = httpGetJSON(u, headers)
+		if lastErr == nil {
+			break
+		}
 	}
-	defer resp.Body.Close()
+	if lastErr != nil {
+		return nil, lastErr
+	}
 	var payload struct {
 		Code any    `json:"code"`
 		Msg  string `json:"msg"`
@@ -180,7 +213,7 @@ func PreviewClaimPlans(token, appVersion string) ([]ClaimPlanPreview, error) {
 			} `json:"plans"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 	// App gốc: code là số, nhưng chấp nhận thêm chuỗi số ("0") — billing
@@ -232,6 +265,9 @@ type ClaimResult struct {
 	PlanID  string
 	EndsAt  int64
 	Plan    ClaimPlanPreview
+	// Uncertain: request đã gửi nhưng mất response (EOF/WAF) — không biết
+	// server đã nhận hay chưa; KHÔNG được tự retry (double claim).
+	Uncertain bool
 }
 
 // FindPlanPreview match plan theo planID trong danh sách preview để
@@ -244,6 +280,24 @@ func FindPlanPreview(plans []ClaimPlanPreview, planID string) *ClaimPlanPreview 
 		}
 	}
 	return nil
+}
+
+// httpGetJSON thực GET với headers cho trước, trả body đã đọc; status
+// != 200 hay body rỗng đều là lỗi (retryable cho caller quyết định).
+func httpGetJSON(url string, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := apiHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return readResponseBody(resp, url)
 }
 
 // ClaimPlan gọi POST /api/v1/zcode-plan/billing/claim với body
@@ -272,6 +326,12 @@ func ClaimPlan(token, planID, appVersion string) (ClaimResult, error) {
 		return ClaimResult{}, err
 	}
 	defer resp.Body.Close()
+	respBody, err := readResponseBody(resp, "/api/v1/zcode-plan/billing/claim")
+	if err != nil {
+		// POST KHÔNG idempotent — không tự retry (double claim nguy hiểm);
+		// đánh dấu uncertain: yêu cầu CÓ THỂ đã vào server nhưng mất response.
+		return ClaimResult{Code: -1, Uncertain: true, Message: "phản hồi bị mất (EOF/WAF)"}, err
+	}
 	var payload struct {
 		Code any `json:"code"`
 		Data struct {
@@ -293,7 +353,7 @@ func ClaimPlan(token, planID, appVersion string) (ClaimResult, error) {
 			} `json:"plan"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(respBody, &payload); err != nil {
 		return ClaimResult{}, err
 	}
 	code := numberCode(payload.Code)
