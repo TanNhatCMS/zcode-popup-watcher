@@ -17,14 +17,14 @@
     "Comments": "Theo dõi deal ZCode, popup nhận deal khi bạn bấm. Không tự claim.",
     "CompanyName": "TanNhatCMS",
     "FileDescription": "Theo dõi deal ZCode - popup nhận deal",
-    "FileVersion": "2.1.0",
+    "FileVersion": "2.1.1",
     "InternalName": "zcode-deal",
     "LegalCopyright": "MIT © 2026 TanNhatCMS",
     "LegalTrademarks": "",
     "OriginalFilename": "zcode-deal.exe",
     "PrivateBuild": "",
     "ProductName": "zcode-deal",
-    "ProductVersion": "2.1.0",
+    "ProductVersion": "2.1.1",
     "SpecialBuild": ""
   },
   "Translation": {

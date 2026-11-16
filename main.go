@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const version = "2.1.0"
+const version = "2.1.1"
 
 const helpText = `zcode-deal ` + version + ` - Theo dõi deal ZCode, popup nhận deal khi bạn bấm.
 
